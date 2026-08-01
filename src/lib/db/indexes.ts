@@ -66,6 +66,12 @@ export async function ensureIndexes(): Promise<void> {
       { campaignId: 1, subscriberId: 1 },
       { unique: true, name: 'campaignId_subscriberId_unique' },
     ),
+    // Attributes an incoming SES/SNS event back to the campaign and recipient
+    // it came from.
+    sentLog.createIndex(
+      { sesMessageId: 1 },
+      { sparse: true, name: 'sesMessageId_sparse' },
+    ),
 
     events.createIndex({ campaignId: 1, type: 1 }, { name: 'campaignId_type' }),
     events.createIndex({ subscriberId: 1, ts: -1 }, { name: 'subscriberId_ts' }),

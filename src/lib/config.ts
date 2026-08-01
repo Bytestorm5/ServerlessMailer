@@ -94,6 +94,12 @@ export const config = {
   /** mailto: address advertised in the List-Unsubscribe header. */
   unsubscribeMailto: () => process.env.UNSUBSCRIBE_MAILTO || undefined,
 
+  /**
+   * Comma-separated hosts that click-tracking redirects may target. When unset,
+   * the signature alone gates the redirector; when set, it is enforced as well.
+   */
+  trackingUrlAllowlist: () => process.env.TRACKING_URL_ALLOWLIST || undefined,
+
   /** Skips MX verification when running without outbound DNS. */
   skipMxCheck: () => process.env.SKIP_MX_CHECK === 'true',
 };
