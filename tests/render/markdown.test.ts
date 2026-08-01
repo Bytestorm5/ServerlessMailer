@@ -208,7 +208,8 @@ describe('docToMarkdown', () => {
     expect(docToMarkdown(doc(p(t('# not a heading'))))).toBe('\\# not a heading');
     expect(docToMarkdown(doc(p(t('- not a bullet'))))).toBe('\\- not a bullet');
     expect(docToMarkdown(doc(p(t('> not a quote'))))).toBe('\\> not a quote');
-    expect(docToMarkdown(doc(p(t('1. not a list'))))).toBe('\\1. not a list');
+    // The punctuation carries the escape: `\1` is not an escape sequence.
+    expect(docToMarkdown(doc(p(t('1. not a list'))))).toBe('1\\. not a list');
     expect(docToMarkdown(doc(p(t('---'))))).toBe('\\---');
   });
 
