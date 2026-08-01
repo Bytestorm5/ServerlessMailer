@@ -248,3 +248,52 @@ describe('ListsManager', () => {
     expect(nav.refresh).not.toHaveBeenCalled();
   });
 });
+
+describe('list test sends', () => {
+  it('sends a test from the row without opening the edit form', async () => {
+    const fetchMock = stubFetch(() => json(200, { ok: true, sent: 1 }));
+    const user = userEvent.setup();
+    render(<ListsManager lists={[ROW]} />);
+
+    await user.click(screen.getByRole('button', { name: 'Send test from Domain A Weekly' }));
+    // The test panel is not the edit form.
+    expect(screen.queryByLabelText('Sending domain')).toBeNull();
+
+    await user.type(screen.getByLabelText('Send to'), 'operator@example.com');
+    await user.click(screen.getByRole('button', { name: 'Send test' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock.mock.calls[0]![0]).toBe(`/api/admin/lists/${ROW.id}/test`);
+    expect(bodyOf(fetchMock)).toEqual({ to: ['operator@example.com'] });
+    // Arrival is the operator's check, so the message says what to look for.
+    expect(screen.getByRole('status')).toHaveTextContent(/Confirm it arrived/);
+  });
+
+  it('shows why a test send was refused', async () => {
+    stubFetch(() => json(400, { ok: false, error: 'That address is on the suppression list' }));
+    const user = userEvent.setup();
+    render(<ListsManager lists={[ROW]} />);
+
+    await user.click(screen.getByRole('button', { name: 'Send test from Domain A Weekly' }));
+    await user.type(screen.getByLabelText('Send to'), 'burned@example.com');
+    await user.click(screen.getByRole('button', { name: 'Send test' }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(/suppression list/),
+    );
+    // The panel stays open so the operator can try another address.
+    expect(screen.getByLabelText('Send to')).toBeInTheDocument();
+  });
+
+  it('closes the test panel on Cancel', async () => {
+    const fetchMock = stubFetch(() => json(200, {}));
+    const user = userEvent.setup();
+    render(<ListsManager lists={[ROW]} />);
+
+    await user.click(screen.getByRole('button', { name: 'Send test from Domain A Weekly' }));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByLabelText('Send to')).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

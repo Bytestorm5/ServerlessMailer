@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ObjectId } from 'mongodb';
 import {
   ListValidationError,
@@ -6,18 +6,26 @@ import {
   deleteList,
   getList,
   listSummaries,
+  sendListTestEmail,
   serializeList,
   updateList,
   validateListInput,
   type ListInput,
 } from '@/lib/lists';
 import {
+  campaignBatchesCollection,
   campaignsCollection,
   importAttestationsCollection,
   listsCollection,
   seedAddressesCollection,
+  sentLogCollection,
   subscribersCollection,
+  suppressionsCollection,
 } from '@/lib/db/collections';
+import { verifyRecipientToken } from '@/lib/crypto/tokens';
+import { resetSesAdapter, setSesAdapter } from '@/lib/ses/registry';
+import { addSuppression } from '@/lib/suppressions';
+import { FakeSes } from '@tests/helpers/fake-ses';
 import { ensureIndexes } from '@/lib/db/indexes';
 import {
   createCampaign,
@@ -52,6 +60,9 @@ beforeEach(async () => {
     (await campaignsCollection()).deleteMany({}),
     (await seedAddressesCollection()).deleteMany({}),
     (await importAttestationsCollection()).deleteMany({}),
+    (await sentLogCollection()).deleteMany({}),
+    (await campaignBatchesCollection()).deleteMany({}),
+    (await suppressionsCollection()).deleteMany({}),
   ]);
 });
 
@@ -282,5 +293,142 @@ describe('listSummaries', () => {
 
     const alpha = summaries.find((s) => s.list._id.equals(b._id))!;
     expect(alpha).toMatchObject({ confirmed: 0, pending: 0, campaigns: 0 });
+  });
+});
+
+describe('sendListTestEmail', () => {
+  let ses: FakeSes;
+
+  beforeEach(() => {
+    ses = new FakeSes();
+    setSesAdapter(ses);
+  });
+
+  afterEach(() => {
+    resetSesAdapter();
+  });
+
+  it('sends from the list identity with no campaign involved', async () => {
+    const list = await createList(VALID);
+
+    const result = await sendListTestEmail({ listId: list._id, to: ['operator@example.com'] });
+
+    expect(result).toEqual({ ok: true, sent: 1 });
+    expect(ses.simpleSends).toHaveLength(1);
+    const sent = ses.simpleSends[0]!;
+    expect(sent).toMatchObject({
+      to: 'operator@example.com',
+      fromEmail: 'hello@news.domain-a.com',
+      fromName: 'Domain A',
+      replyTo: 'hello@domain-a.com',
+      // The whole point: the configuration set rides on the test too, so the
+      // return path is exercised, not just delivery.
+      configurationSet: 'domain-a-config',
+    });
+    expect(sent.content.subject).toMatch(/^\[TEST\] /);
+    expect(sent.headers?.['X-SM-Test-Send']).toBe('true');
+  });
+
+  it('renders the footer machinery through the real path', async () => {
+    const list = await createList(VALID);
+    await sendListTestEmail({ listId: list._id, to: ['operator@example.com'] });
+
+    const { content } = ses.simpleSends[0]!;
+    // Merge field resolved with its fallback, postal address and unsubscribe
+    // link present — the three things a hand-written list gets wrong.
+    expect(content.html).toContain('there');
+    expect(content.html).toContain(VALID.physicalAddress);
+    expect(content.html).toContain('/api/unsubscribe?t=');
+    expect(content.text).toContain(VALID.physicalAddress);
+  });
+
+  it('records nothing against campaigns, batches or sent_log', async () => {
+    const list = await createList(VALID);
+    await sendListTestEmail({ listId: list._id, to: ['operator@example.com'] });
+
+    expect(await (await campaignsCollection()).countDocuments({})).toBe(0);
+    expect(await (await sentLogCollection()).countDocuments({})).toBe(0);
+    expect(await (await campaignBatchesCollection()).countDocuments({})).toBe(0);
+  });
+
+  it('signs the unsubscribe link with a subscriber that does not exist', async () => {
+    const list = await createList(VALID);
+    const subscriber = await createSubscriber(list._id, { email: 'real@example.com' });
+
+    await sendListTestEmail({ listId: list._id, to: ['operator@example.com'] });
+
+    const token = ses.simpleSends[0]!.headers!['List-Unsubscribe']!;
+    const decoded = verifyRecipientToken(
+      decodeURIComponent(token.replace(/^<.*\?t=/, '').replace(/>$/, '')),
+    );
+    // Well-formed, so the link works — but it points at nobody, so clicking it
+    // in a test inbox cannot unsubscribe a real person.
+    expect(decoded).not.toBeNull();
+    expect(decoded!.subscriberId).not.toBe(subscriber._id.toHexString());
+  });
+
+  it('refuses a suppressed address', async () => {
+    const list = await createList(VALID);
+    await addSuppression({ email: 'burned@example.com', reason: 'hard_bounce' });
+
+    const result = await sendListTestEmail({ listId: list._id, to: ['burned@example.com'] });
+
+    expect(result).toEqual({ ok: false, reason: 'suppressed_address' });
+    expect(ses.simpleSends).toHaveLength(0);
+  });
+
+  it('tests an inactive list, because staging one is the point of inactive', async () => {
+    const list = await createList({ ...VALID, active: false });
+    expect(await sendListTestEmail({ listId: list._id, to: ['operator@example.com'] })).toEqual({
+      ok: true,
+      sent: 1,
+    });
+  });
+
+  it.each([
+    ['no addresses', [] as string[], 'no_recipients'],
+    ['too many addresses', Array.from({ length: 11 }, (_, i) => `a${i}@example.com`), 'too_many_recipients'],
+    ['a malformed address', ['not-an-email'], 'invalid_address:syntax'],
+  ])('refuses %s', async (_label, to, reason) => {
+    const list = await createList(VALID);
+    expect(await sendListTestEmail({ listId: list._id, to })).toEqual({ ok: false, reason });
+    expect(ses.simpleSends).toHaveLength(0);
+  });
+
+  it('refuses the whole request when one address of several is malformed', async () => {
+    const list = await createList(VALID);
+    // A partially-sent test reads as a passing test.
+    const result = await sendListTestEmail({
+      listId: list._id,
+      to: ['good@example.com', 'bad@@example.com'],
+    });
+    expect(result.ok).toBe(false);
+    expect(ses.simpleSends).toHaveLength(0);
+  });
+
+  it('reports a missing list', async () => {
+    expect(await sendListTestEmail({ listId: new ObjectId(), to: ['a@example.com'] })).toEqual({
+      ok: false,
+      reason: 'list_not_found',
+    });
+  });
+
+  it('reports a send that SES rejected', async () => {
+    const list = await createList(VALID);
+    ses.failAddresses.add('rejected@example.com');
+
+    expect(
+      await sendListTestEmail({ listId: list._id, to: ['rejected@example.com'] }),
+    ).toEqual({ ok: false, reason: 'send_failed' });
+  });
+
+  it('sends to several addresses at once', async () => {
+    const list = await createList(VALID);
+    const result = await sendListTestEmail({
+      listId: list._id,
+      to: ['one@example.com', 'two@example.com'],
+    });
+    expect(result).toEqual({ ok: true, sent: 2 });
+    expect(ses.simpleSends.map((s) => s.to)).toEqual(['one@example.com', 'two@example.com']);
   });
 });

@@ -131,3 +131,23 @@ vanished mid-send; none of that is recoverable by re-creating a list with the
 same name, because every reference is by `_id`. Deactivation is the reversible
 operation — it closes signups and hides the list from the campaign picker while
 leaving history intact — and it is what an operator almost always means.
+
+### A list can be tested before a campaign exists
+
+§6.5 covers test sends, but the only implementation was campaign-scoped, and the
+thing most likely to be wrong on a newly configured list is the sending identity
+itself — an unverified domain, a From address outside it, a mistyped
+configuration set. Those are precisely the fields a campaign inherits, so
+discovering them through a campaign is discovering them late.
+
+`/admin/lists` can therefore send a test from a list alone. It renders a
+synthetic campaign — never persisted — through `renderCampaignPreview`, so the
+merge path, the postal address and the unsubscribe footer are the real ones
+rather than a second implementation written for testing. Nothing is written to
+`sent_log`, batches or campaign counts, and the unsubscribe link is signed with
+a synthetic subscriber id so clicking it in a test inbox cannot unsubscribe a
+real person.
+
+It refuses a suppressed address. A test send is a real send with real
+reputation cost, and §1.2 admits no bypass — the campaign-scoped
+`sendTestEmail` predates this module and does not yet make the same check.

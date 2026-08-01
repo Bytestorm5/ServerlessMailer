@@ -1,13 +1,17 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ObjectId } from 'mongodb';
 import { ADMIN_COOKIE_NAME, createSessionToken } from '@/lib/auth';
 import {
   campaignsCollection,
   listsCollection,
   subscribersCollection,
+  suppressionsCollection,
 } from '@/lib/db/collections';
 import { ensureIndexes } from '@/lib/db/indexes';
+import { resetSesAdapter, setSesAdapter } from '@/lib/ses/registry';
+import { addSuppression } from '@/lib/suppressions';
 import { createCampaign, createList, createSubscriber } from '@tests/helpers/factories';
+import { FakeSes } from '@tests/helpers/fake-ses';
 
 import { GET as listsGet, POST as listsPost } from '@/app/api/admin/lists/route';
 import {
@@ -15,6 +19,7 @@ import {
   GET as listGet,
   PATCH as listPatch,
 } from '@/app/api/admin/lists/[id]/route';
+import { POST as listTestPost } from '@/app/api/admin/lists/[id]/test/route';
 
 /** List configuration routes (§3.1), including the admin guard on every one. */
 
@@ -51,6 +56,7 @@ beforeEach(async () => {
     (await listsCollection()).deleteMany({}),
     (await subscribersCollection()).deleteMany({}),
     (await campaignsCollection()).deleteMany({}),
+    (await suppressionsCollection()).deleteMany({}),
   ]);
 });
 
@@ -66,9 +72,13 @@ describe('the admin guard', () => {
         params(id),
       ),
       listDelete(req(`/api/admin/lists/${id}`, { method: 'DELETE' }, false), params(id)),
+      listTestPost(
+        req(`/api/admin/lists/${id}/test`, { method: 'POST', body: '{}' }, false),
+        params(id),
+      ),
     ]);
 
-    expect(responses.map((r) => r.status)).toEqual([401, 401, 401, 401, 401]);
+    expect(responses.map((r) => r.status)).toEqual([401, 401, 401, 401, 401, 401]);
   });
 });
 
@@ -286,6 +296,80 @@ describe('DELETE /api/admin/lists/[id]', () => {
           params(missing),
         )
       ).status,
+    ).toBe(404);
+  });
+});
+
+describe('POST /api/admin/lists/[id]/test', () => {
+  let ses: FakeSes;
+
+  beforeEach(() => {
+    ses = new FakeSes();
+    setSesAdapter(ses);
+  });
+
+  afterEach(() => {
+    resetSesAdapter();
+  });
+
+  const testReq = (id: string, to: unknown) =>
+    req(`/api/admin/lists/${id}/test`, { method: 'POST', body: JSON.stringify({ to }) });
+
+  it('sends a test from the list identity', async () => {
+    const list = await createList();
+    const id = list._id.toHexString();
+
+    const response = await listTestPost(testReq(id, ['operator@example.com']), params(id));
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).sent).toBe(1);
+    expect(ses.simpleSends[0]).toMatchObject({
+      to: 'operator@example.com',
+      configurationSet: 'domain-a-config',
+    });
+  });
+
+  it('explains a suppressed address instead of returning a code', async () => {
+    const list = await createList();
+    const id = list._id.toHexString();
+    await addSuppression({ email: 'burned@example.com', reason: 'complaint' });
+
+    const response = await listTestPost(testReq(id, ['burned@example.com']), params(id));
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toMatch(/suppression list/);
+    expect(ses.simpleSends).toHaveLength(0);
+  });
+
+  it.each([
+    ['an empty list of addresses', [], /Enter an address/],
+    ['a malformed address', ['nope'], /not a valid email/],
+    ['more than ten addresses', Array.from({ length: 11 }, (_, i) => `a${i}@x.com`), /limited to 10/],
+  ])('rejects %s with a readable message', async (_label, to, expected) => {
+    const list = await createList();
+    const id = list._id.toHexString();
+
+    const response = await listTestPost(testReq(id, to), params(id));
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toMatch(expected as RegExp);
+  });
+
+  it('surfaces an SES rejection', async () => {
+    const list = await createList();
+    const id = list._id.toHexString();
+    ses.failAddresses.add('rejected@example.com');
+
+    const response = await listTestPost(testReq(id, ['rejected@example.com']), params(id));
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toMatch(/configuration set exists/);
+  });
+
+  it('400s an unparseable id and 404s an unknown one', async () => {
+    expect((await listTestPost(testReq('nope', ['a@x.com']), params('nope'))).status).toBe(400);
+
+    const missing = new ObjectId().toHexString();
+    expect(
+      (await listTestPost(testReq(missing, ['a@x.com']), params(missing))).status,
     ).toBe(404);
   });
 });

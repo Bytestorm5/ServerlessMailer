@@ -516,6 +516,9 @@ export async function getList(id: ObjectId): Promise<ListDoc | null>;
 export async function createList(input: ListInput, now?: Date): Promise<ListDoc>;
 export async function updateList(id: ObjectId, patch: Partial<ListInput>): Promise<ListDoc | null>;
 export async function deleteList(id: ObjectId): Promise<DeleteListResult>;
+export async function sendListTestEmail(input: {
+  listId: ObjectId; to: string[]; now?: Date;
+}): Promise<{ ok: true; sent: number } | { ok: false; reason: string }>;
 ```
 
 `updateList` merges the patch onto the stored document and validates the
@@ -524,6 +527,12 @@ one of them. `deleteList` refuses a list that any subscriber or campaign
 references and returns `{ deleted: false, reason: 'in_use', … }`; only an
 unreferenced list is removed, together with its seed addresses and import
 attestations.
+
+`sendListTestEmail` is the campaign-free half of §6.5: it renders a synthetic
+campaign through `renderCampaignPreview` and sends it from the list's identity,
+writing nothing to `sent_log`, batches or campaign counts. It signs the
+unsubscribe link with a synthetic subscriber id and refuses a suppressed
+address.
 
 ## 29. API routes — `src/app/api/**`
 
@@ -543,6 +552,7 @@ Handlers are thin: parse, delegate to a lib function, shape the response.
 | `/api/t/c/[token]` | GET | Signed click redirect (§13, §12). |
 | `/api/admin/lists` | GET, POST | §3.1 list configuration. POST returns 201. |
 | `/api/admin/lists/[id]` | GET, PATCH, DELETE | PATCH is partial. DELETE returns 409 for a list in use. |
+| `/api/admin/lists/[id]/test` | POST | §6.5 test send from the list identity, no campaign. |
 | `/api/admin/**` | * | Session-authenticated; all campaign/subscriber writes. |
 
 All admin routes must return 401 without a valid session. The subscribe,

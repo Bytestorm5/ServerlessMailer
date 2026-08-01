@@ -82,9 +82,12 @@ export function ListsManager({ lists }: { lists: ListRow[] }) {
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+  const [testing, setTesting] = useState<ListRow | null>(null);
+  const [testAddress, setTestAddress] = useState('');
 
   function openCreate() {
     setEditing('new');
+    setTesting(null);
     setForm(EMPTY);
     setError(null);
     setStatus(null);
@@ -92,6 +95,7 @@ export function ListsManager({ lists }: { lists: ListRow[] }) {
 
   function openEdit(row: ListRow) {
     setEditing(row.id);
+    setTesting(null);
     setForm(toForm(row));
     setError(null);
     setStatus(null);
@@ -147,6 +151,33 @@ export function ListsManager({ lists }: { lists: ListRow[] }) {
     }
     setStatus(row.active ? `"${row.name}" deactivated.` : `"${row.name}" activated.`);
     router.refresh();
+  }
+
+  async function sendTest(event: React.FormEvent) {
+    event.preventDefault();
+    if (!testing) return;
+
+    setBusy(true);
+    setError(null);
+    setStatus(null);
+    const response = await fetch(`/api/admin/lists/${testing.id}/test`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ to: [testAddress] }),
+    });
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    setBusy(false);
+
+    if (!response.ok) {
+      setError(body.error ?? 'Could not send the test.');
+      return;
+    }
+    // Arrival is the operator's check, not something this screen can assert.
+    setStatus(
+      `Test sent to ${testAddress}. Confirm it arrived, passed DKIM, and produced a delivery event.`,
+    );
+    setTesting(null);
+    setTestAddress('');
   }
 
   async function remove(row: ListRow) {
@@ -271,6 +302,40 @@ export function ListsManager({ lists }: { lists: ListRow[] }) {
         </form>
       )}
 
+      {testing && (
+        <form onSubmit={sendTest} style={{ margin: '1rem 0', display: 'grid', gap: '0.5rem' }}>
+          <h2 style={{ fontSize: '1rem', margin: 0 }}>Send a test from {testing.name}</h2>
+          <p className="muted" style={{ margin: 0 }}>
+            Sends a rendered message from {testing.fromEmail} through the{' '}
+            {testing.sesConfigurationSet} configuration set. No campaign needed, nothing is
+            recorded against any campaign, and the unsubscribe link in it is inert.
+          </p>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <label htmlFor="list-test-address">Send to</label>
+            <input
+              id="list-test-address"
+              type="email"
+              value={testAddress}
+              placeholder="you@example.com"
+              onChange={(e) => setTestAddress(e.target.value)}
+            />
+            <button type="submit" disabled={busy || !testAddress}>
+              Send test
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setTesting(null);
+                setError(null);
+              }}
+              disabled={busy}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
       <div className="sm-scroll">
         <table className="sm-table">
           <thead>
@@ -319,6 +384,19 @@ export function ListsManager({ lists }: { lists: ListRow[] }) {
                     </span>
                   ) : (
                     <span style={{ display: 'inline-flex', gap: '0.5rem' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTesting(row);
+                          setEditing(null);
+                          setError(null);
+                          setStatus(null);
+                        }}
+                        disabled={busy}
+                        aria-label={`Send test from ${row.name}`}
+                      >
+                        Send test
+                      </button>
                       <button type="button" onClick={() => openEdit(row)} disabled={busy}>
                         Edit
                       </button>

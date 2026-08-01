@@ -8,7 +8,10 @@ import {
 } from '@/lib/db/collections';
 import { isValidDomain, normalizeAndValidate, normalizeEmail } from '@/lib/email/normalize';
 import { logger } from '@/lib/logging';
-import type { ListDoc } from '@/lib/types';
+import { renderCampaignPreview, unsubscribeUrlFor } from '@/lib/render/campaign';
+import { getSesAdapter } from '@/lib/ses/registry';
+import { isSuppressed } from '@/lib/suppressions';
+import type { CampaignDoc, EditorDoc, ListDoc, RecipientContext } from '@/lib/types';
 
 /**
  * List configuration (§3.1).
@@ -332,4 +335,184 @@ export async function deleteList(id: ObjectId): Promise<DeleteListResult> {
     sendingDomain: existing.sendingDomain,
   });
   return { deleted: true };
+}
+
+/* ------------------------------------------------------------ test sends */
+
+/** Matches the campaign test-send cap (§6.5). */
+const MAX_TEST_RECIPIENTS = 10;
+
+/**
+ * The body of a list test send.
+ *
+ * It carries a merge field with a fallback, the unsubscribe URL and the postal
+ * address, because those are the three parts of the footer machinery an
+ * operator most needs to see working before a campaign exists. Rendering it
+ * through the normal path means a test that passes here is evidence about the
+ * real path, not about a second one written for tests.
+ */
+function verificationBody(list: ListDoc): EditorDoc {
+  return {
+    type: 'doc',
+    content: [
+      {
+        type: 'heading',
+        attrs: { level: 2 },
+        content: [{ type: 'text', text: `Sending identity check — ${list.name}` }],
+      },
+      {
+        type: 'paragraph',
+        content: [
+          {
+            type: 'text',
+            text:
+              'Hello {{ first_name | default: "there" }}. If this arrived, this list can send: ' +
+              `the From address is ${list.fromName} <${list.fromEmail}>, replies go to ` +
+              `${list.replyTo}, and the message was sent from ${list.sendingDomain} through the ` +
+              `"${list.sesConfigurationSet}" configuration set.`,
+          },
+        ],
+      },
+      {
+        type: 'paragraph',
+        content: [
+          {
+            type: 'text',
+            text:
+              'Check the message passed DKIM and DMARC in your client, and confirm a delivery ' +
+              'event reached the webhook. Arrival alone does not prove the return path works.',
+          },
+        ],
+      },
+      { type: 'paragraph', content: [{ type: 'text', text: '{{ unsubscribe_url }}' }] },
+      { type: 'paragraph', content: [{ type: 'text', text: '{{ physical_address }}' }] },
+    ],
+  };
+}
+
+/**
+ * A campaign-shaped value that is rendered and then thrown away. It is never
+ * inserted, so nothing claims it, reconciles it or counts it.
+ */
+function syntheticCampaign(list: ListDoc, now: Date): CampaignDoc {
+  return {
+    _id: new ObjectId(),
+    listId: list._id,
+    subject: `Sending identity check — ${list.name}`,
+    preheader: 'Verifying the sending identity for this list.',
+    bodySource: verificationBody(list),
+    status: 'draft',
+    segmentQuery: {},
+    trackOpens: false,
+    trackClicks: false,
+    counts: {
+      recipients: 0,
+      sent: 0,
+      failed: 0,
+      bounced: 0,
+      complained: 0,
+      unsubscribed: 0,
+      delivered: 0,
+      opened: 0,
+      clicked: 0,
+    },
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export type ListTestSendResult =
+  | { ok: true; sent: number }
+  | { ok: false; reason: string };
+
+/**
+ * Sends a test email from a list to an arbitrary address, with no campaign
+ * involved (§6.5).
+ *
+ * This is the check that belongs *before* the first campaign exists: it proves
+ * the whole sending identity — verified domain, From and Reply-To, physical
+ * address, configuration set — end to end, which is exactly the set of things a
+ * hand-written list document gets wrong. It renders through
+ * `renderCampaignPreview`, so it exercises the real merge and footer path.
+ *
+ * Three things it deliberately does not do: it never writes to `sent_log`,
+ * campaign counts or batches; it signs the unsubscribe link with a synthetic
+ * subscriber id, so clicking it in a test cannot unsubscribe a real person; and
+ * it refuses a suppressed address. The suppression list is checked on every send
+ * path with no bypass (§1.2), and a test send to an address that already hard
+ * bounced is a real send to SES with real reputation cost.
+ *
+ * An inactive list can still be tested — staging a list and verifying it before
+ * opening signups is the reason `active` exists.
+ */
+export async function sendListTestEmail(input: {
+  listId: ObjectId;
+  to: string[];
+  now?: Date;
+}): Promise<ListTestSendResult> {
+  const now = input.now ?? new Date();
+
+  if (input.to.length === 0) return { ok: false, reason: 'no_recipients' };
+  if (input.to.length > MAX_TEST_RECIPIENTS) return { ok: false, reason: 'too_many_recipients' };
+
+  const addresses: string[] = [];
+  for (const raw of input.to) {
+    const check = normalizeAndValidate(raw);
+    // Refuse the whole request rather than silently sending to the subset that
+    // parsed: a half-sent test is read as a passing test.
+    if (!check.ok) return { ok: false, reason: `invalid_address:${check.reason}` };
+    addresses.push(check.email);
+  }
+
+  const list = await getList(input.listId);
+  if (!list) return { ok: false, reason: 'list_not_found' };
+
+  for (const address of addresses) {
+    if (await isSuppressed(address)) return { ok: false, reason: 'suppressed_address' };
+  }
+
+  const campaign = syntheticCampaign(list, now);
+  // A synthetic subscriber id keeps the token well-formed while pointing at
+  // nobody, so the unsubscribe link in a test is inert.
+  const { url } = unsubscribeUrlFor(campaign._id.toHexString(), new ObjectId().toHexString());
+
+  const ses = await getSesAdapter();
+  let sent = 0;
+
+  for (const address of addresses) {
+    const ctx: RecipientContext = {
+      subscriberId: new ObjectId().toHexString(),
+      email: address,
+      attributes: {},
+      unsubscribeUrl: url,
+    };
+
+    try {
+      const rendered = await renderCampaignPreview(campaign, list, ctx);
+      await ses.sendSimple({
+        fromName: list.fromName,
+        fromEmail: list.fromEmail,
+        replyTo: list.replyTo,
+        to: address,
+        configurationSet: list.sesConfigurationSet,
+        content: { ...rendered, subject: `[TEST] ${rendered.subject}` },
+        headers: {
+          'X-SM-Test-Send': 'true',
+          'List-Unsubscribe': `<${url}>`,
+          'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+        },
+      });
+      sent += 1;
+    } catch (err) {
+      // The address is not logged: `logger` redacts it, and the operator sees
+      // the count in the response either way.
+      logger.error('list test send failed', {
+        listId: list._id.toHexString(),
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  if (sent === 0) return { ok: false, reason: 'send_failed' };
+  return { ok: true, sent };
 }
