@@ -1,0 +1,38 @@
+import { ListsManager, type ListRow } from '@/components/admin/ListsManager';
+import { listSummaries } from '@/lib/lists';
+
+export const dynamic = 'force-dynamic';
+export const metadata = { title: 'Lists — ServerlessMailer' };
+
+export default async function ListsPage() {
+  const summaries = await listSummaries();
+
+  const rows: ListRow[] = summaries.map(
+    ({ list, confirmed, pending, unsubscribed, campaigns }) => ({
+      id: list._id.toHexString(),
+      name: list.name,
+      sendingDomain: list.sendingDomain,
+      fromName: list.fromName,
+      fromEmail: list.fromEmail,
+      replyTo: list.replyTo,
+      physicalAddress: list.physicalAddress,
+      sesConfigurationSet: list.sesConfigurationSet,
+      active: list.active,
+      welcomeUrl: list.welcomeUrl ?? null,
+      counts: { confirmed, pending, unsubscribed, campaigns },
+    }),
+  );
+
+  return (
+    <>
+      <h1>Lists</h1>
+      <p className="muted">
+        One list per newsletter. Every campaign inherits its sending domain, From
+        and Reply-To addresses, physical address and SES configuration set from
+        here, so a mistake on this page reaches every recipient.
+      </p>
+
+      <ListsManager lists={rows} />
+    </>
+  );
+}

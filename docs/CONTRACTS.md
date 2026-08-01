@@ -499,6 +499,32 @@ per-entry `ReplacementHeaders` for `List-Unsubscribe` /
 per-destination failure. Translates throttling into `SesThrottlingError`.
 `isIdentityVerified` uses `GetEmailIdentityCommand`.
 
+## 28a. `src/lib/lists.ts`
+
+```ts
+export class ListValidationError extends Error {}
+export interface ListInput {
+  name: string; sendingDomain: string; fromName: string; fromEmail: string;
+  replyTo: string; physicalAddress: string; sesConfigurationSet: string;
+  active?: boolean; welcomeUrl?: string;
+}
+export function validateListInput(input: ListInput): Omit<ListDoc, '_id' | 'createdAt'>;
+export function serializeList(list: ListDoc): Record<string, unknown>;
+export async function listLists(): Promise<ListDoc[]>;
+export async function listSummaries(): Promise<ListSummary[]>;   // list + subscriber/campaign counts
+export async function getList(id: ObjectId): Promise<ListDoc | null>;
+export async function createList(input: ListInput, now?: Date): Promise<ListDoc>;
+export async function updateList(id: ObjectId, patch: Partial<ListInput>): Promise<ListDoc | null>;
+export async function deleteList(id: ObjectId): Promise<DeleteListResult>;
+```
+
+`updateList` merges the patch onto the stored document and validates the
+*result*, so `fromEmail` and `sendingDomain` cannot be desynchronised by editing
+one of them. `deleteList` refuses a list that any subscriber or campaign
+references and returns `{ deleted: false, reason: 'in_use', … }`; only an
+unreferenced list is removed, together with its seed addresses and import
+attestations.
+
 ## 29. API routes — `src/app/api/**`
 
 Every route is a Next.js App Router route handler exporting `GET`/`POST`.
@@ -515,6 +541,8 @@ Handlers are thin: parse, delegate to a lib function, shape the response.
 | `/api/cron/purge` | GET | Daily purge of expired `pending` (§4.1). |
 | `/api/t/o/[token]` | GET | 1×1 GIF open pixel (§13). |
 | `/api/t/c/[token]` | GET | Signed click redirect (§13, §12). |
+| `/api/admin/lists` | GET, POST | §3.1 list configuration. POST returns 201. |
+| `/api/admin/lists/[id]` | GET, PATCH, DELETE | PATCH is partial. DELETE returns 409 for a list in use. |
 | `/api/admin/**` | * | Session-authenticated; all campaign/subscriber writes. |
 
 All admin routes must return 401 without a valid session. The subscribe,

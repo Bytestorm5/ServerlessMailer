@@ -110,3 +110,24 @@ unsubscribe link, and that it carries the postal address — are made against th
 *rendered* output rather than the source. Checking the source would pass a
 campaign whose template had regressed and dropped the footer. Rendering costs a
 few hundred milliseconds and is paid once per send.
+
+### Lists are configured in the app, and a populated list is never deleted
+
+§3.1 defines the `lists` collection but no surface for editing it, so a list
+could only be created by inserting a document into MongoDB by hand — which put
+the sending identity (verified domain, From address, physical address,
+configuration set) outside the application that depends on all four, and left a
+fresh deployment unable to do anything at all until someone reached for
+`mongosh`. `/admin/lists` now owns it.
+
+Two rules make that safe. Validation runs against the whole document rather than
+the incoming patch, because `fromEmail` is only meaningful in relation to
+`sendingDomain`: SES rejects a From address outside the verified identity, so
+editing one side of that pair alone must fail. And deletion is refused for a
+list that any subscriber or campaign references. Subscribers hold the consent
+evidence that answers a complaint, campaigns hold the send history behind the
+reputation numbers, and `processBatch` fails a batch outright when its list has
+vanished mid-send; none of that is recoverable by re-creating a list with the
+same name, because every reference is by `_id`. Deactivation is the reversible
+operation — it closes signups and hides the list from the campaign picker while
+leaving history intact — and it is what an operator almost always means.

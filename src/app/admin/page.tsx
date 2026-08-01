@@ -68,7 +68,12 @@ export default async function DashboardPage() {
             </p>
           </div>
         ))}
-        {perList.length === 0 && <p className="muted">No lists configured yet.</p>}
+        {perList.length === 0 && (
+          <p className="muted">
+            No lists configured yet — <Link href="/admin/lists">create one</Link>. Nothing can be
+            sent until one exists.
+          </p>
+        )}
       </dl>
 
       <h2 style={{ fontSize: '1rem' }}>Recent campaigns</h2>

@@ -43,6 +43,11 @@ cp .env.example .env.local   # then fill in the secrets
 npm run dev
 ```
 
+A fresh deployment has no lists, and nothing can be sent until one exists.
+Create one at `/admin/lists` — it holds the verified SES sending domain, the
+From and Reply-To addresses, the legally required physical address and the SES
+configuration set that every campaign on that list inherits.
+
 Run the test suite (an in-memory MongoDB is started automatically):
 
 ```bash
