@@ -294,6 +294,26 @@ export interface EditorMark {
   attrs?: Record<string, unknown>;
 }
 
+/* ------------------------------------------------------ pre-send gate (§6.6) */
+
+/**
+ * One row of the pre-send validation gate. Declared here rather than in
+ * `presend.ts` so the confirmation UI can depend on the shape without pulling
+ * in the database-backed validator.
+ */
+export interface PresendCheck {
+  id: string;
+  label: string;
+  passed: boolean;
+  detail?: string;
+}
+
+export interface PresendResult {
+  passed: boolean;
+  checks: PresendCheck[];
+  recipientCount: number;
+}
+
 /* -------------------------------------------------------------- rendering */
 
 /** Per-recipient data used for merge-field substitution and tokenised links. */

@@ -145,6 +145,11 @@ describe('parseMergeFields', () => {
     expect(fallbacks('{{ first_name | default: "a\\qb" }}')).toEqual(['aqb']);
   });
 
+  it('unescapes the remaining whitespace escapes', () => {
+    expect(fallbacks('{{ first_name | default: "a\\tb" }}')).toEqual(['a\tb']);
+    expect(fallbacks('{{ first_name | default: "a\\rb" }}')).toEqual(['a\rb']);
+  });
+
   it('allows braces inside a quoted fallback without ending the expression early', () => {
     // A naive /\{\{(.*?)\}\}/ regex gets this wrong and truncates the fallback.
     const refs = parseMergeFields('{{ first_name | default: "closes }} here" }} tail');
@@ -239,6 +244,27 @@ describe('parseMergeFields (malformed input)', () => {
   it('ignores an unterminated quoted fallback rather than swallowing the rest of the body', () => {
     expect(parseMergeFields('{{ first_name | default: "there }} and the rest')).toEqual([]);
     expect(parseMergeFields(`{{ first_name | default: 'there }}`)).toEqual([]);
+  });
+
+  it('ignores a fallback that ends on a dangling backslash', () => {
+    // The backslash escapes the end of the input, so the literal never closes.
+    // It must not be read as an escape of a character that does not exist.
+    expect(parseMergeFields('{{ first_name | default: "abc\\')).toEqual([]);
+    expect(parseMergeFields(`{{ first_name | default: 'abc\\`)).toEqual([]);
+  });
+
+  it('does not mistake a non-quote HTML entity for the start of a fallback', () => {
+    // `&amp;` is not `&quot;`/`&apos;`. The clause is therefore malformed, so the
+    // field is still reported — with no fallback — for the §6.6 gate to reject.
+    const text = '{{ first_name | default: &amp;there }}';
+    const refs = parseMergeFields(text);
+
+    expect(refs).toHaveLength(1);
+    expect(refs[0].field).toBe('first_name');
+    expect(refs[0].fallback).toBeNull();
+    expect(refs[0].raw).toBe(text);
+    expect(findMergeFieldsWithoutFallback(text)).toHaveLength(1);
+    expect(toSesPlaceholders(text)).toBe('{{first_name}}');
   });
 
   it('ignores a literal "{{" used in prose', () => {
@@ -773,5 +799,60 @@ describe('resolveReplacements', () => {
 
     expect(viaSes).toBe(direct);
     expect(viaSes).toBe('Hi there of Domain A Weekly!');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* hostile and malformed data maps                                     */
+/* ------------------------------------------------------------------ */
+
+describe('merge data is read as own properties only', () => {
+  const body = 'Hi {{ first_name | default: "there" }}!';
+
+  it('ignores a string value inherited from the data object prototype', () => {
+    // Attribute maps are rehydrated from JSON/CSV upstream. A value reachable
+    // only through the prototype chain is not this subscriber's data, and
+    // rendering it puts one recipient's attribute in another's email.
+    const inherited = Object.create({
+      first_name: 'SomeoneElse',
+      email: 'ghost@example.com',
+    }) as Record<string, string>;
+
+    expect(renderMergeFields(body, inherited)).toBe('Hi there!');
+    expect(renderMergeFields('{{ email }}', inherited)).toBe('{{ email }}');
+    expect(resolveReplacements('{{ first_name | default: "there" }}{{ email }}', inherited)).toEqual(
+      { first_name: 'there', email: '' },
+    );
+  });
+
+  it('is immune to a polluted Object.prototype', () => {
+    // A `__proto__` key in an imported CSV can pollute the global prototype.
+    // Every merge field in every campaign would then resolve to the attacker's
+    // value for every recipient at once.
+    Object.defineProperty(Object.prototype, 'first_name', {
+      value: 'POLLUTED',
+      configurable: true,
+      enumerable: false,
+      writable: true,
+    });
+    try {
+      expect(renderMergeFields(body, {})).toBe('Hi there!');
+      expect(resolveReplacements(body, {}).first_name).toBe('there');
+      expect(renderMergeFields('Hi {{ first_name }}!', {})).toBe('Hi {{ first_name }}!');
+    } finally {
+      delete (Object.prototype as unknown as Record<string, unknown>).first_name;
+    }
+  });
+
+  it('treats a missing or non-object data map as "no data" rather than throwing', () => {
+    // The data map crosses a JSON boundary; a null landing here must degrade to
+    // the fallback, not throw inside an in-flight batch of 50 recipients.
+    for (const data of [null, undefined, 'not-an-object', 42] as unknown as Record<
+      string,
+      string
+    >[]) {
+      expect(renderMergeFields(body, data)).toBe('Hi there!');
+      expect(resolveReplacements(body, data)).toEqual({ first_name: 'there' });
+    }
   });
 });
