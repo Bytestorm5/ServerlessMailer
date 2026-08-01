@@ -1,4 +1,5 @@
 import { ListsManager, type ListRow } from '@/components/admin/ListsManager';
+import { config } from '@/lib/config';
 import { listSummaries } from '@/lib/lists';
 
 export const dynamic = 'force-dynamic';
@@ -32,7 +33,17 @@ export default async function ListsPage() {
         here, so a mistake on this page reaches every recipient.
       </p>
 
-      <ListsManager lists={rows} />
+      {/*
+        The join command has to point at the public origin the confirmation and
+        unsubscribe links use, not at whatever host the admin happens to be open
+        on — a preview deployment would otherwise hand out its own URL. Only
+        whether Turnstile is configured crosses to the client, never the secret.
+      */}
+      <ListsManager
+        lists={rows}
+        baseUrl={config.appBaseUrl()}
+        turnstileRequired={config.turnstileSecret() !== undefined}
+      />
     </>
   );
 }

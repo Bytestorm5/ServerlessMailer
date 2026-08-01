@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ListsManager, type ListRow } from '@/components/admin/ListsManager';
+import { ListsManager, buildJoinCurl, type ListRow } from '@/components/admin/ListsManager';
 
 const nav = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
 vi.mock('next/navigation', () => ({
@@ -26,6 +26,19 @@ function json(status: number, body: unknown) {
 function bodyOf(fetchMock: ReturnType<typeof stubFetch>, index = 0): Record<string, unknown> {
   const init = fetchMock.mock.calls[index]![1] as RequestInit;
   return JSON.parse(String(init.body)) as Record<string, unknown>;
+}
+
+/** The configured public origin, i.e. what `APP_BASE_URL` resolves to. */
+const BASE = 'https://mail.example.com';
+
+function renderManager(lists: ListRow[], options: { turnstileRequired?: boolean } = {}) {
+  return render(
+    <ListsManager
+      lists={lists}
+      baseUrl={BASE}
+      turnstileRequired={options.turnstileRequired ?? false}
+    />,
+  );
 }
 
 const ROW: ListRow = {
@@ -58,12 +71,12 @@ function rowFor(name: string) {
 
 describe('ListsManager', () => {
   it('says plainly that nothing can be sent with no lists', () => {
-    render(<ListsManager lists={[]} />);
+    renderManager([]);
     expect(screen.getByText(/Nothing can be sent until one exists/)).toBeInTheDocument();
   });
 
   it('shows the counts that decide whether a list can be deleted', () => {
-    render(<ListsManager lists={[ROW]} />);
+    renderManager([ROW]);
     const row = rowFor('Domain A Weekly');
     expect(within(row).getByText(/12/)).toBeInTheDocument();
     expect(within(row).getByText(/3 pending/)).toBeInTheDocument();
@@ -73,7 +86,7 @@ describe('ListsManager', () => {
   it('creates a list from the new-list form', async () => {
     const fetchMock = stubFetch(() => json(201, { ok: true, list: { id: 'new-list' } }));
     const user = userEvent.setup();
-    render(<ListsManager lists={[]} />);
+    renderManager([]);
 
     await user.click(screen.getByRole('button', { name: 'New list' }));
     await user.type(screen.getByLabelText('Name'), 'Domain B Monthly');
@@ -103,7 +116,7 @@ describe('ListsManager', () => {
       json(400, { ok: false, error: 'fromEmail must be at news.domain-b.com or a subdomain' }),
     );
     const user = userEvent.setup();
-    render(<ListsManager lists={[]} />);
+    renderManager([]);
 
     await user.click(screen.getByRole('button', { name: 'New list' }));
     await user.type(screen.getByLabelText('Name'), 'Bad list');
@@ -119,7 +132,7 @@ describe('ListsManager', () => {
   it('pre-fills the edit form and PATCHes the changed field', async () => {
     const fetchMock = stubFetch(() => json(200, { ok: true, list: { id: ROW.id } }));
     const user = userEvent.setup();
-    render(<ListsManager lists={[ROW]} />);
+    renderManager([ROW]);
 
     await user.click(within(rowFor('Domain A Weekly')).getByRole('button', { name: 'Edit' }));
     expect(screen.getByLabelText('Sending domain')).toHaveValue('news.domain-a.com');
@@ -139,7 +152,7 @@ describe('ListsManager', () => {
   it('deactivates without touching subscribers', async () => {
     const fetchMock = stubFetch(() => json(200, { ok: true, list: { id: ROW.id } }));
     const user = userEvent.setup();
-    render(<ListsManager lists={[ROW]} />);
+    renderManager([ROW]);
 
     await user.click(
       within(rowFor('Domain A Weekly')).getByRole('button', { name: 'Deactivate' }),
@@ -153,7 +166,7 @@ describe('ListsManager', () => {
   it('carries the optional welcome URL and an unchecked active box', async () => {
     const fetchMock = stubFetch(() => json(201, { ok: true, list: { id: 'new-list' } }));
     const user = userEvent.setup();
-    render(<ListsManager lists={[]} />);
+    renderManager([]);
 
     await user.click(screen.getByRole('button', { name: 'New list' }));
     await user.type(screen.getByLabelText('Name'), 'Staged list');
@@ -172,7 +185,7 @@ describe('ListsManager', () => {
   it('closes the form on Cancel without sending anything', async () => {
     const fetchMock = stubFetch(() => json(200, {}));
     const user = userEvent.setup();
-    render(<ListsManager lists={[ROW]} />);
+    renderManager([ROW]);
 
     await user.click(within(rowFor('Domain A Weekly')).getByRole('button', { name: 'Edit' }));
     expect(screen.getByLabelText('Name')).toBeInTheDocument();
@@ -185,7 +198,7 @@ describe('ListsManager', () => {
   it('reports a failed activation change', async () => {
     stubFetch(() => json(500, { ok: false, error: 'internal error' }));
     const user = userEvent.setup();
-    render(<ListsManager lists={[ROW]} />);
+    renderManager([ROW]);
 
     await user.click(
       within(rowFor('Domain A Weekly')).getByRole('button', { name: 'Deactivate' }),
@@ -198,7 +211,7 @@ describe('ListsManager', () => {
   it('offers Activate for an inactive list', async () => {
     const fetchMock = stubFetch(() => json(200, { ok: true, list: { id: ROW.id } }));
     const user = userEvent.setup();
-    render(<ListsManager lists={[{ ...ROW, active: false }]} />);
+    renderManager([{ ...ROW, active: false }]);
 
     await user.click(within(rowFor('Domain A Weekly')).getByRole('button', { name: 'Activate' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
@@ -208,7 +221,7 @@ describe('ListsManager', () => {
   it('requires a second click before deleting', async () => {
     const fetchMock = stubFetch(() => json(200, { ok: true, deleted: true }));
     const user = userEvent.setup();
-    render(<ListsManager lists={[ROW]} />);
+    renderManager([ROW]);
 
     await user.click(screen.getByRole('button', { name: 'Delete Domain A Weekly' }));
     // The first click only arms the confirmation.
@@ -224,7 +237,7 @@ describe('ListsManager', () => {
   it('cancels an armed delete', async () => {
     const fetchMock = stubFetch(() => json(200, { ok: true }));
     const user = userEvent.setup();
-    render(<ListsManager lists={[ROW]} />);
+    renderManager([ROW]);
 
     await user.click(screen.getByRole('button', { name: 'Delete Domain A Weekly' }));
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -238,7 +251,7 @@ describe('ListsManager', () => {
       '"Domain A Weekly" still has 12 subscriber(s) and 2 campaign(s). Deactivate the list instead.';
     stubFetch(() => json(409, { ok: false, error: refusal, subscribers: 12, campaigns: 2 }));
     const user = userEvent.setup();
-    render(<ListsManager lists={[ROW]} />);
+    renderManager([ROW]);
 
     await user.click(screen.getByRole('button', { name: 'Delete Domain A Weekly' }));
     await user.click(screen.getByRole('button', { name: 'Confirm delete' }));
@@ -253,7 +266,7 @@ describe('list test sends', () => {
   it('sends a test from the row without opening the edit form', async () => {
     const fetchMock = stubFetch(() => json(200, { ok: true, sent: 1 }));
     const user = userEvent.setup();
-    render(<ListsManager lists={[ROW]} />);
+    renderManager([ROW]);
 
     await user.click(screen.getByRole('button', { name: 'Send test from Domain A Weekly' }));
     // The test panel is not the edit form.
@@ -272,7 +285,7 @@ describe('list test sends', () => {
   it('shows why a test send was refused', async () => {
     stubFetch(() => json(400, { ok: false, error: 'That address is on the suppression list' }));
     const user = userEvent.setup();
-    render(<ListsManager lists={[ROW]} />);
+    renderManager([ROW]);
 
     await user.click(screen.getByRole('button', { name: 'Send test from Domain A Weekly' }));
     await user.type(screen.getByLabelText('Send to'), 'burned@example.com');
@@ -288,12 +301,147 @@ describe('list test sends', () => {
   it('closes the test panel on Cancel', async () => {
     const fetchMock = stubFetch(() => json(200, {}));
     const user = userEvent.setup();
-    render(<ListsManager lists={[ROW]} />);
+    renderManager([ROW]);
 
     await user.click(screen.getByRole('button', { name: 'Send test from Domain A Weekly' }));
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(screen.queryByLabelText('Send to')).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('buildJoinCurl', () => {
+  const command = buildJoinCurl({ baseUrl: BASE, listId: ROW.id, turnstileRequired: false });
+
+  it('posts the list id and an address to the public signup endpoint', () => {
+    expect(command).toContain(`curl -X POST '${BASE}/api/subscribe'`);
+    expect(command).toContain("-H 'content-type: application/json'");
+    // The body has to parse as the JSON the endpoint reads, not merely look like it.
+    const body = JSON.parse(command.slice(command.indexOf("-d '") + 4, -1)) as Record<
+      string,
+      string
+    >;
+    expect(body).toEqual({ listId: ROW.id, email: 'you@example.com' });
+  });
+
+  it('omits the Turnstile field unless the deployment requires one', () => {
+    expect(command).not.toContain('turnstileToken');
+    expect(
+      buildJoinCurl({ baseUrl: BASE, listId: ROW.id, turnstileRequired: true }),
+    ).toContain('turnstileToken');
+  });
+
+  it('does not double the slash when the base URL carries a trailing one', () => {
+    expect(
+      buildJoinCurl({ baseUrl: `${BASE}/`, listId: ROW.id, turnstileRequired: false }),
+    ).toContain(`'${BASE}/api/subscribe'`);
+  });
+
+  it('closes and reopens the quoting around a single quote rather than breaking out', () => {
+    // Nothing in a URL should contain one, but a generated shell command that
+    // can be broken by its own input is not worth offering.
+    const quoted = buildJoinCurl({
+      baseUrl: "https://mail.example.com/it's",
+      listId: ROW.id,
+      turnstileRequired: false,
+    });
+    expect(quoted).toContain(`'https://mail.example.com/it'\\''s/api/subscribe'`);
+  });
+});
+
+describe('join endpoint panel', () => {
+  it('shows the command for the row it was opened from', async () => {
+    const user = userEvent.setup();
+    const second: ListRow = { ...ROW, id: '507f1f77bcf86cd799439012', name: 'Domain B Monthly' };
+    renderManager([ROW, second]);
+
+    await user.click(screen.getByRole('button', { name: 'Join endpoint for Domain B Monthly' }));
+
+    expect(
+      screen.getByRole('heading', { name: /Join endpoint for Domain B Monthly/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(second.id))).toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(ROW.id))).toBeNull();
+    // The panel is not the edit form, and the endpoint is public — opening it
+    // must not look like a change to the list.
+    expect(screen.queryByLabelText('Sending domain')).toBeNull();
+  });
+
+  it('says what the call actually does before anyone runs it', async () => {
+    const user = userEvent.setup();
+    renderManager([ROW]);
+
+    await user.click(screen.getByRole('button', { name: 'Join endpoint for Domain A Weekly' }));
+
+    expect(screen.getByText(/starts double opt-in/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Replace the address with a mailbox you can open/),
+    ).toBeInTheDocument();
+  });
+
+  it('copies the command to the clipboard', async () => {
+    const user = userEvent.setup();
+    renderManager([ROW]);
+
+    await user.click(screen.getByRole('button', { name: 'Join endpoint for Domain A Weekly' }));
+    await user.click(screen.getByRole('button', { name: 'Copy command' }));
+
+    await waitFor(async () =>
+      expect(await navigator.clipboard.readText()).toBe(
+        buildJoinCurl({ baseUrl: BASE, listId: ROW.id, turnstileRequired: false }),
+      ),
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('curl command copied.');
+  });
+
+  it('admits a refused clipboard instead of reporting a copy that did not happen', async () => {
+    const user = userEvent.setup();
+    renderManager([ROW]);
+    vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('denied'));
+
+    await user.click(screen.getByRole('button', { name: 'Join endpoint for Domain A Weekly' }));
+    await user.click(screen.getByRole('button', { name: 'Copy command' }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(/Select the command above/),
+    );
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('warns that an inactive list refuses the call', async () => {
+    const user = userEvent.setup();
+    renderManager([{ ...ROW, active: false }]);
+
+    await user.click(screen.getByRole('button', { name: 'Join endpoint for Domain A Weekly' }));
+
+    expect(screen.getByText(/until it is activated/)).toBeInTheDocument();
+  });
+
+  it('explains the Turnstile field only where Turnstile is configured', async () => {
+    const user = userEvent.setup();
+    const { unmount } = renderManager([ROW]);
+
+    await user.click(screen.getByRole('button', { name: 'Join endpoint for Domain A Weekly' }));
+    expect(screen.queryByText(/issued by the widget/)).toBeNull();
+    unmount();
+
+    renderManager([ROW], { turnstileRequired: true });
+    await user.click(screen.getByRole('button', { name: 'Join endpoint for Domain A Weekly' }));
+    expect(screen.getByText(/issued by the widget/)).toBeInTheDocument();
+    expect(screen.getByText(/turnstileToken/)).toBeInTheDocument();
+  });
+
+  it('closes on Close', async () => {
+    const fetchMock = stubFetch(() => json(200, {}));
+    const user = userEvent.setup();
+    renderManager([ROW]);
+
+    await user.click(screen.getByRole('button', { name: 'Join endpoint for Domain A Weekly' }));
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+
+    expect(screen.queryByRole('heading', { name: /Join endpoint for/ })).toBeNull();
+    // Reading the endpoint is not a write; nothing should have been sent.
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

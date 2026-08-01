@@ -17,6 +17,10 @@ import { useRouter } from 'next/navigation';
  *  - **Delete is refused by the server** for a list that has subscribers or
  *    campaigns. The counts sit next to the button so the refusal is visible
  *    before it is triggered, and the server's explanation is shown verbatim.
+ *  - **The join endpoint is shown, not documented elsewhere.** A list is only
+ *    useful once something can post to it, and the one piece of the signup call
+ *    an operator cannot guess is the list id. It lives on this row, so the curl
+ *    command is built here.
  */
 
 export interface ListRow {
@@ -73,7 +77,54 @@ function toForm(row: ListRow): FormState {
 
 const num = (value: number) => value.toLocaleString('en-GB');
 
-export function ListsManager({ lists }: { lists: ListRow[] }) {
+/** Single-quoted for the shell, with any embedded quote closed and reopened. */
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * The signup call for one list, as a command that runs as-is.
+ *
+ * This is exactly what a public form posts (§5.1) — nothing about the endpoint
+ * is admin-only. What an operator cannot obtain anywhere else is `listId`, and
+ * a request without it is refused with the same "Unknown list." that an
+ * inactive list produces, which is a confusing way to learn the field exists.
+ *
+ * The address is deliberately a placeholder: `/api/subscribe` does an MX lookup
+ * on the domain, so `example.com` is rejected outright, and the confirmation
+ * email has to land in a mailbox the operator can actually open.
+ */
+export function buildJoinCurl(input: {
+  baseUrl: string;
+  listId: string;
+  turnstileRequired: boolean;
+}): string {
+  const body: Record<string, string> = {
+    listId: input.listId,
+    email: 'you@example.com',
+  };
+  // On a Turnstile-protected deployment the call is a flat 400 without this, so
+  // the field is shown rather than left to be discovered by failing.
+  if (input.turnstileRequired) body.turnstileToken = '<token from the Turnstile widget>';
+
+  const url = `${input.baseUrl.replace(/\/+$/, '')}/api/subscribe`;
+  return [
+    `curl -X POST ${shellQuote(url)} \\`,
+    `  -H 'content-type: application/json' \\`,
+    `  -d ${shellQuote(JSON.stringify(body))}`,
+  ].join('\n');
+}
+
+export function ListsManager({
+  lists,
+  baseUrl,
+  turnstileRequired,
+}: {
+  lists: ListRow[];
+  /** `APP_BASE_URL`, so the command targets the same origin the emails do. */
+  baseUrl: string;
+  turnstileRequired: boolean;
+}) {
   const router = useRouter();
   // `null` = closed, `'new'` = creating, otherwise the id being edited.
   const [editing, setEditing] = useState<string | null>(null);
@@ -84,10 +135,12 @@ export function ListsManager({ lists }: { lists: ListRow[] }) {
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const [testing, setTesting] = useState<ListRow | null>(null);
   const [testAddress, setTestAddress] = useState('');
+  const [joining, setJoining] = useState<ListRow | null>(null);
 
   function openCreate() {
     setEditing('new');
     setTesting(null);
+    setJoining(null);
     setForm(EMPTY);
     setError(null);
     setStatus(null);
@@ -96,6 +149,7 @@ export function ListsManager({ lists }: { lists: ListRow[] }) {
   function openEdit(row: ListRow) {
     setEditing(row.id);
     setTesting(null);
+    setJoining(null);
     setForm(toForm(row));
     setError(null);
     setStatus(null);
@@ -178,6 +232,19 @@ export function ListsManager({ lists }: { lists: ListRow[] }) {
     );
     setTesting(null);
     setTestAddress('');
+  }
+
+  async function copyJoinCurl(command: string) {
+    setError(null);
+    setStatus(null);
+    try {
+      await navigator.clipboard.writeText(command);
+      setStatus('curl command copied.');
+    } catch {
+      // A denied permission, or a page served over plain HTTP. The command is
+      // on screen either way, so say what happened instead of claiming a copy.
+      setError('Could not reach the clipboard. Select the command above and copy it.');
+    }
   }
 
   async function remove(row: ListRow) {
@@ -336,6 +403,71 @@ export function ListsManager({ lists }: { lists: ListRow[] }) {
         </form>
       )}
 
+      {joining && (
+        <section style={{ margin: '1rem 0', display: 'grid', gap: '0.5rem' }}>
+          <h2 style={{ fontSize: '1rem', margin: 0 }}>Join endpoint for {joining.name}</h2>
+          <p className="muted" style={{ margin: 0 }}>
+            The request a signup form makes. It starts double opt-in: the address is stored
+            as pending and a confirmation email goes out — nobody is subscribed by this call
+            alone. The response is identical for a new, pending, confirmed or suppressed
+            address, so it cannot be used to find out who is on the list.
+          </p>
+
+          <pre className="sm-code">
+            {buildJoinCurl({ baseUrl, listId: joining.id, turnstileRequired })}
+          </pre>
+
+          <ul className="muted" style={{ margin: 0, paddingLeft: '1.1rem' }}>
+            <li>
+              Replace the address with a mailbox you can open. The domain needs an MX
+              record, and the confirmation link arrives there.
+            </li>
+            <li>
+              Merge fields go in an <code>attributes</code> object alongside{' '}
+              <code>email</code>.
+            </li>
+            <li>
+              Calls are rate-limited per IP, and a repeat for the same address inside the
+              resend window returns the same success without sending anything.
+            </li>
+            {turnstileRequired && (
+              <li>
+                Turnstile is configured on this deployment, so the token has to be a real
+                one issued by the widget.
+              </li>
+            )}
+            {!joining.active && (
+              <li>
+                This list is inactive, so the endpoint answers &ldquo;Unknown list.&rdquo;
+                until it is activated.
+              </li>
+            )}
+          </ul>
+
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button
+              type="button"
+              onClick={() =>
+                copyJoinCurl(
+                  buildJoinCurl({ baseUrl, listId: joining.id, turnstileRequired }),
+                )
+              }
+            >
+              Copy command
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setJoining(null);
+                setError(null);
+              }}
+            >
+              Close
+            </button>
+          </div>
+        </section>
+      )}
+
       <div className="sm-scroll">
         <table className="sm-table">
           <thead>
@@ -383,12 +515,15 @@ export function ListsManager({ lists }: { lists: ListRow[] }) {
                       </button>
                     </span>
                   ) : (
-                    <span style={{ display: 'inline-flex', gap: '0.5rem' }}>
+                    // Wrapping keeps Delete on screen at a narrow width instead
+                    // of pushing it behind a horizontal scroll.
+                    <span style={{ display: 'inline-flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                       <button
                         type="button"
                         onClick={() => {
                           setTesting(row);
                           setEditing(null);
+                          setJoining(null);
                           setError(null);
                           setStatus(null);
                         }}
@@ -396,6 +531,20 @@ export function ListsManager({ lists }: { lists: ListRow[] }) {
                         aria-label={`Send test from ${row.name}`}
                       >
                         Send test
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setJoining(row);
+                          setEditing(null);
+                          setTesting(null);
+                          setError(null);
+                          setStatus(null);
+                        }}
+                        disabled={busy}
+                        aria-label={`Join endpoint for ${row.name}`}
+                      >
+                        Join endpoint
                       </button>
                       <button type="button" onClick={() => openEdit(row)} disabled={busy}>
                         Edit

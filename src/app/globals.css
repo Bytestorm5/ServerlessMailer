@@ -196,6 +196,20 @@ textarea {
   color: var(--danger);
 }
 
+/* ------------------------------------------------------------------ code */
+
+/* A command meant to be copied, so it wraps rather than truncating. */
+.sm-code {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.75rem 0.9rem;
+  margin: 0;
+}
+
 /* ---------------------------------------------------------------- editor */
 
 .sm-screen {
