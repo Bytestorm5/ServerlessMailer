@@ -1,0 +1,586 @@
+/*
+ * A deliberately plain interface. The writing surface is the product (§6);
+ * everything else gets out of its way.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #fbfbfa;
+  --surface: #ffffff;
+  --text: #1c1c1a;
+  --muted: #6b6963;
+  --line: #e4e2dc;
+  --accent: #1a1a17;
+  --danger: #a3251b;
+  --ok: #1f6b3a;
+  --radius: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17171a;
+    --surface: #1e1e21;
+    --text: #ececea;
+    --muted: #8d8b85;
+    --line: #313135;
+    --accent: #ececea;
+    --danger: #ef7b70;
+    --ok: #6cc08b;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+}
+
+a {
+  color: inherit;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  padding: 0.45rem 0.85rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button.sm-primary {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+  font-weight: 500;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* ----------------------------------------------------------------- shell */
+
+.sm-shell {
+  display: grid;
+  grid-template-columns: 15rem 1fr;
+  min-height: 100vh;
+}
+
+.sm-nav {
+  border-right: 1px solid var(--line);
+  padding: 1.25rem 1rem;
+  background: var(--surface);
+}
+
+.sm-nav h1 {
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 1rem;
+}
+
+.sm-nav a {
+  display: block;
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--radius);
+  text-decoration: none;
+}
+
+.sm-nav a:hover,
+.sm-nav a[aria-current='page'] {
+  background: var(--bg);
+}
+
+.sm-main {
+  padding: 1.5rem 2rem 4rem;
+  min-width: 0;
+}
+
+/* ----------------------------------------------------------------- tables */
+
+.sm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.925rem;
+}
+
+.sm-table th,
+.sm-table td {
+  text-align: left;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.sm-table th {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.sm-scroll {
+  overflow-x: auto;
+}
+
+/* ------------------------------------------------------------- dashboard */
+
+.sm-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.75rem;
+  margin: 0 0 1.5rem;
+}
+
+.sm-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.9rem 1rem;
+}
+
+.sm-card dt {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  margin: 0 0 0.35rem;
+}
+
+.sm-card dd {
+  margin: 0;
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Reputation is surfaced prominently, never buried in a metrics tab (§8.3). */
+.sm-card.is-warning {
+  border-color: var(--danger);
+}
+
+.sm-card.is-warning dd {
+  color: var(--danger);
+}
+
+/* ---------------------------------------------------------------- editor */
+
+.sm-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: calc(100vh - 5rem);
+}
+
+.sm-screen-head {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.sm-subject {
+  font-size: 1.35rem;
+  font-weight: 600;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding-left: 0;
+  background: transparent;
+}
+
+.sm-preheader {
+  border: none;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding-left: 0;
+  background: transparent;
+  color: var(--muted);
+}
+
+.sm-screen-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.sm-save-error {
+  color: var(--danger);
+  font-weight: 500;
+}
+
+.sm-screen-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 60rem) {
+  .sm-screen-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sm-shell {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sm-editor {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.sm-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.4rem;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 2;
+}
+
+.sm-toolbar-button {
+  min-width: 2rem;
+  padding: 0.3rem 0.5rem;
+  border-color: transparent;
+  background: transparent;
+}
+
+.sm-toolbar-button.is-active {
+  background: var(--bg);
+  border-color: var(--line);
+}
+
+.sm-toolbar-divider {
+  width: 1px;
+  height: 1.2rem;
+  background: var(--line);
+  margin: 0 0.25rem;
+}
+
+.sm-merge {
+  position: relative;
+}
+
+.sm-merge-menu {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  min-width: 15rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+  padding: 0.25rem;
+}
+
+.sm-merge-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+}
+
+.sm-merge-menu button:hover {
+  background: var(--bg);
+}
+
+.sm-merge-menu small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+/* The writing surface itself: full width, generous, quiet. */
+.sm-editor-surface {
+  min-height: 24rem;
+  padding: 1.5rem;
+  outline: none;
+}
+
+.sm-editor-surface p {
+  margin: 0 0 1rem;
+}
+
+.sm-editor-surface h2 {
+  font-size: 1.35rem;
+  margin: 1.6rem 0 0.6rem;
+}
+
+.sm-editor-surface h3 {
+  font-size: 1.1rem;
+  margin: 1.4rem 0 0.5rem;
+}
+
+.sm-editor-surface blockquote {
+  margin: 0 0 1rem;
+  padding-left: 1rem;
+  border-left: 3px solid var(--line);
+  color: var(--muted);
+}
+
+.sm-editor-surface img {
+  max-width: 100%;
+  height: auto;
+}
+
+.sm-editor-surface hr {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 1.5rem 0;
+}
+
+.sm-editor-surface p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.sm-editor-error {
+  margin: 0;
+  padding: 0.5rem 1rem;
+  color: var(--danger);
+  border-bottom: 1px solid var(--line);
+  font-size: 0.9rem;
+}
+
+.sm-test-send {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.sm-versions {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
+
+.sm-versions ul {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+}
+
+.sm-versions li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+/* --------------------------------------------------------------- preview */
+
+.sm-preview {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  position: sticky;
+  top: 1rem;
+}
+
+.sm-preview-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.sm-preview-bar [role='tablist'],
+.sm-preview-bar [role='radiogroup'] {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.sm-preview-bar [aria-selected='true'],
+.sm-preview-bar [aria-checked='true'] {
+  background: var(--bg);
+  border-color: var(--muted);
+}
+
+.sm-preview-as {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+  font-size: 0.85rem;
+}
+
+.sm-preview-stage {
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem;
+  background: var(--bg);
+  min-height: 28rem;
+}
+
+.sm-preview-frame {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+  min-height: 28rem;
+  width: 100%;
+}
+
+.sm-preview-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1rem;
+  margin: 0;
+  overflow-x: auto;
+}
+
+.sm-preview-error {
+  margin: 0;
+  padding: 1rem;
+  color: var(--danger);
+}
+
+/* ----------------------------------------------------------------- modal */
+
+.sm-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 45%);
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  z-index: 20;
+}
+
+.sm-modal {
+  background: var(--surface);
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  padding: 1.5rem;
+  max-width: 34rem;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.sm-modal h2 {
+  margin: 0 0 1rem;
+  font-size: 1.25rem;
+}
+
+.sm-modal-facts {
+  margin: 0 0 1.25rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.sm-modal-facts > div {
+  display: grid;
+  grid-template-columns: 9rem 1fr;
+  gap: 0.75rem;
+}
+
+.sm-modal-facts dt {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.sm-modal-facts dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.sm-modal-blockers {
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  color: var(--danger);
+  margin: 0 0 1.25rem;
+}
+
+.sm-modal-blockers ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.sm-modal-typed {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0 0 1.25rem;
+}
+
+.sm-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+/* ---------------------------------------------------------------- badges */
+
+.sm-badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.sm-badge.is-confirmed,
+.sm-badge.is-sent {
+  color: var(--ok);
+  border-color: currentcolor;
+}
+
+.sm-badge.is-bounced,
+.sm-badge.is-complained,
+.sm-badge.is-failed {
+  color: var(--danger);
+  border-color: currentcolor;
+}

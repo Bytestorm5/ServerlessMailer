@@ -144,12 +144,23 @@ describe('freeze', () => {
     expect(result.checks?.find((c) => c.id === 'from_domain_verified')?.passed).toBe(false);
   });
 
-  it('returns the campaign to draft when the segment matches nobody', async () => {
+  it('refuses a campaign whose segment matches nobody, leaving it in draft', async () => {
+    // Two layers guard this. The pre-send gate catches it first, which is why
+    // the reason is validation_failed rather than no_recipients; freeze's own
+    // no_recipients path remains as the guard for the case where the segment
+    // empties out between validation and resolution.
     const campaign = await draft();
 
-    expect(await freezeCampaign(campaign._id)).toEqual({ ok: false, reason: 'no_recipients' });
+    const result = await freezeCampaign(campaign._id);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.reason).toBe('validation_failed');
+    expect(result.checks?.find((c) => c.id === 'recipient_count')?.passed).toBe(false);
+
     const doc = await (await campaignsCollection()).findOne({ _id: campaign._id });
     expect(doc?.status).toBe('draft');
+    expect(await (await campaignBatchesCollection()).countDocuments()).toBe(0);
   });
 
   it('reports not_found for an unknown campaign', async () => {
