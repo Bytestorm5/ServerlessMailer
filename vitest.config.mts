@@ -27,6 +27,11 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html', 'json-summary'],
       reportsDirectory: './coverage',
+      // Vitest's own clean step races with the per-worker temp files once the
+      // suite is large enough to fan out across many forks, so the directory is
+      // removed by the npm script instead.
+      clean: false,
+      cleanOnRerun: false,
       include: ['src/**/*.ts', 'src/**/*.tsx'],
       exclude: [
         'src/**/*.d.ts',
