@@ -376,6 +376,26 @@ describe('optional-feature switches', () => {
       expect(read()).toBe('configured-value');
     });
   });
+
+  it.each(['0x4AAAAAAsecret\n', '  0x4AAAAAAsecret', '0x4AAAAAAsecret \r\n'])(
+    'turnstileSecret strips the whitespace around %j',
+    (raw) => {
+      // Cloudflare compares the secret byte for byte and answers
+      // `invalid-input-secret` for a stray newline — the shape a secret takes
+      // when it is piped in from a file or pasted out of a dashboard. That
+      // failure reaches the visitor as "verification failed", so it reads as a
+      // broken Turnstile rather than as the deployment typo it is.
+      withEnv({ TURNSTILE_SECRET_KEY: raw }, () => {
+        expect(config.turnstileSecret()).toBe('0x4AAAAAAsecret');
+      });
+    },
+  );
+
+  it('turnstileSecret treats a whitespace-only value as feature-off', () => {
+    withEnv({ TURNSTILE_SECRET_KEY: '  \n' }, () => {
+      expect(config.turnstileSecret()).toBeUndefined();
+    });
+  });
 });
 
 describe('skipMxCheck', () => {

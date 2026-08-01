@@ -174,6 +174,105 @@ describe('default verifier — Cloudflare siteverify contract', () => {
     });
   });
 
+  it.each(['unknown', '', 'not-an-ip', '::ffff:bad!'])(
+    'omits remoteip rather than forwarding the non-address %j',
+    async (ip) => {
+      await withSecret(SECRET, async () => {
+        const fetchSpy = stubFetch(async () => jsonResponse({ success: true }));
+
+        // A caller that could not resolve the client address must not be able
+        // to fail an otherwise-good token by sending its placeholder on.
+        await expect(verifyTurnstile('tok-abc', ip)).resolves.toBe(true);
+        expect(postedForm(fetchSpy).has('remoteip')).toBe(false);
+      });
+    },
+  );
+
+  it.each(['203.0.113.7', '2001:db8::1', '::1'])('forwards the real address %s', async (ip) => {
+    await withSecret(SECRET, async () => {
+      const fetchSpy = stubFetch(async () => jsonResponse({ success: true }));
+
+      await verifyTurnstile('tok-abc', ip);
+      expect(postedForm(fetchSpy).get('remoteip')).toBe(ip);
+    });
+  });
+
+  it('sends the secret with surrounding whitespace stripped', async () => {
+    // A trailing newline is what `vercel env add < file` and a dashboard paste
+    // leave behind, and Cloudflare answers `invalid-input-secret` — which the
+    // signup form can only report as "verification failed", for every visitor.
+    await withSecret(`  ${SECRET}\n`, async () => {
+      const fetchSpy = stubFetch(async () => jsonResponse({ success: true }));
+
+      await expect(verifyTurnstile('tok-abc')).resolves.toBe(true);
+      expect(postedForm(fetchSpy).get('secret')).toBe(SECRET);
+    });
+  });
+
+  it('sends the token with surrounding whitespace stripped', async () => {
+    await withSecret(SECRET, async () => {
+      const fetchSpy = stubFetch(async () => jsonResponse({ success: true }));
+
+      await verifyTurnstile(' tok-abc\n');
+      expect(postedForm(fetchSpy).get('response')).toBe('tok-abc');
+    });
+  });
+
+  it('treats a whitespace-only secret as unconfigured', async () => {
+    await withSecret('   \n', async () => {
+      const fetchSpy = stubFetch(async () => jsonResponse({ success: false }));
+
+      await expect(verifyTurnstile(undefined)).resolves.toBe(true);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  it('treats a whitespace-only token as missing', async () => {
+    await withSecret(SECRET, async () => {
+      const fetchSpy = stubFetch(async () => jsonResponse({ success: true }));
+
+      await expect(verifyTurnstile('   ')).resolves.toBe(false);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  it("logs Cloudflare's error codes so a rejection can be told apart from abuse", async () => {
+    await withSecret(SECRET, async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      stubFetch(async () => jsonResponse({ success: false, 'error-codes': ['invalid-input-secret'] }));
+
+      await expect(verifyTurnstile('tok', '203.0.113.7')).resolves.toBe(false);
+
+      const line = warn.mock.calls.map((args) => String(args[0])).join('\n');
+      // Without the code in the log, a wrong secret and a bot look identical.
+      expect(line).toContain('invalid-input-secret');
+    });
+  });
+
+  it('logs an empty code list rather than crashing on a body without one', async () => {
+    await withSecret(SECRET, async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      stubFetch(async () => jsonResponse({ success: false }, 200));
+
+      await expect(verifyTurnstile('tok')).resolves.toBe(false);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toContain('"errorCodes":[]');
+    });
+  });
+
+  it('never writes the secret or the token into the rejection log', async () => {
+    await withSecret(SECRET, async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      stubFetch(async () => jsonResponse({ success: false, 'error-codes': ['invalid-input-response'] }));
+
+      await verifyTurnstile('tok-secret-value', '203.0.113.7');
+
+      const line = warn.mock.calls.map((args) => String(args[0])).join('\n');
+      expect(line).not.toContain(SECRET);
+      expect(line).not.toContain('tok-secret-value');
+    });
+  });
+
   it('sends the secret from the environment at call time, not a captured copy', async () => {
     await withSecret('first-secret', async () => {
       const fetchSpy = stubFetch(async () => jsonResponse({ success: true }));

@@ -84,8 +84,16 @@ export const config = {
 
   signupRateLimitPerIpPerHour: () => numeric('SIGNUP_RATE_LIMIT_IP_PER_HOUR', 20),
 
-  /** Optional Cloudflare Turnstile. When unset, the check is skipped. */
-  turnstileSecret: () => process.env.TURNSTILE_SECRET_KEY || undefined,
+  /**
+   * Optional Cloudflare Turnstile. When unset, the check is skipped.
+   *
+   * Trimmed because Cloudflare compares the secret byte for byte: one trailing
+   * newline — which is exactly what `vercel env add < file` and a copy-paste
+   * out of the dashboard leave behind — turns every siteverify call into
+   * `invalid-input-secret`, and the signup form rejects every human on the
+   * site. Secrets are never whitespace-significant, so trimming loses nothing.
+   */
+  turnstileSecret: () => process.env.TURNSTILE_SECRET_KEY?.trim() || undefined,
 
   /** Transient bounces across this many distinct campaigns cause suppression (§8.2). */
   transientBounceSuppressionThreshold: () =>

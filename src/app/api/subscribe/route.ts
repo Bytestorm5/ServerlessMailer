@@ -74,7 +74,10 @@ export async function POST(request: Request): Promise<Response> {
   const body = await readBody(request);
   if (!body) return badRequest('Malformed request body.');
 
-  const ip = clientIp(request) ?? 'unknown';
+  // The rate limiter needs a bucket key for every request, so it keeps the
+  // sentinel; Cloudflare gets a real address or no `remoteip` at all.
+  const requestIp = clientIp(request);
+  const ip = requestIp ?? 'unknown';
 
   // 1. Rate limit by IP before doing any work at all.
   const ipLimit = await consumeRateLimit(
@@ -99,7 +102,7 @@ export async function POST(request: Request): Promise<Response> {
     }
   }
 
-  if (!(await verifyTurnstile(body.turnstileToken as string | undefined, ip))) {
+  if (!(await verifyTurnstile(body.turnstileToken as string | undefined, requestIp))) {
     return badRequest('Verification failed. Please try again.');
   }
 
