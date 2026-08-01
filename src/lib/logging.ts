@@ -7,7 +7,15 @@
  * arrive embedded in an SES error message the caller never inspected.
  */
 
-const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+/**
+ * The local-part class here must be at least as wide as `LOCAL_ATOM` in
+ * `email/normalize.ts`, or an address this application happily stores would be
+ * only partly redacted: a narrower class starts matching *after* the character
+ * it does not recognise, so `o'brien@example.com` would log as `o'…`. This is
+ * RFC 5322 atext plus the `.` separator.
+ */
+const EMAIL_PATTERN =
+  /[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 
 /**
  * Replaces an address with a stable, non-reversible-enough marker that still
@@ -31,15 +39,27 @@ export function scrub(value: unknown): unknown {
     };
   }
   if (Array.isArray(value)) return value.map(scrub);
+  if (value instanceof Date) return value.toISOString();
   if (value && typeof value === 'object') {
+    // Object.entries() is empty for Map, Set and similar, which would silently
+    // serialize them as `{}`. Anything with a useful string form gets one.
+    if (typeof (value as { toHexString?: unknown }).toHexString === 'function') {
+      return (value as { toHexString: () => string }).toHexString();
+    }
+    if (value instanceof Map) return scrub(Object.fromEntries(value));
+    if (value instanceof Set) return scrub([...value]);
+
     const out: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      // Keys are scrubbed too: nothing currently keys a log context by address,
+      // but "every string is scrubbed" should hold for keys as well as values.
+      const safeKey = scrub(key) as string;
       // Belt and braces: a field literally named `email` is dropped to a
       // domain-only marker even if its value somehow dodges the pattern.
       if (/^(email|emailAddress|to|recipient)$/i.test(key) && typeof val === 'string') {
-        out[key] = redactEmail(val);
+        out[safeKey] = redactEmail(val);
       } else {
-        out[key] = scrub(val);
+        out[safeKey] = scrub(val);
       }
     }
     return out;

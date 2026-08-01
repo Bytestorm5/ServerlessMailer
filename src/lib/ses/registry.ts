@@ -5,7 +5,7 @@ import type { SesAdapter } from '@/lib/ses/types';
  * Tests swap in a fake; production lazily constructs the AWS-backed adapter.
  */
 let override: SesAdapter | undefined;
-let cachedReal: SesAdapter | undefined;
+let cachedReal: Promise<SesAdapter> | undefined;
 
 export function setSesAdapter(adapter: SesAdapter | undefined): void {
   override = adapter;
@@ -13,9 +13,12 @@ export function setSesAdapter(adapter: SesAdapter | undefined): void {
 
 export async function getSesAdapter(): Promise<SesAdapter> {
   if (override) return override;
-  if (cachedReal) return cachedReal;
-  const { createAwsSesAdapter } = await import('@/lib/ses/aws');
-  cachedReal = createAwsSesAdapter();
+  // The *promise* is memoised, not its result. Caching the resolved adapter
+  // would let concurrent cold calls all get past the check before any of them
+  // awaited the import, each building its own SESv2Client.
+  if (!cachedReal) {
+    cachedReal = import('@/lib/ses/aws').then((module) => module.createAwsSesAdapter());
+  }
   return cachedReal;
 }
 
