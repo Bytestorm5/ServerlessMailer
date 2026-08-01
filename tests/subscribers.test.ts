@@ -273,6 +273,40 @@ describe('unsubscribeSubscriber', () => {
     });
     expect(result.ok).toBe(false);
   });
+
+  it('attributes the opt-out to the campaign that prompted it', async () => {
+    const { campaignsCollection } = await import('@/lib/db/collections');
+    const { createCampaign } = await import('@tests/helpers/factories');
+    const campaign = await createCampaign(list._id);
+    const sub = await createSubscriber(list._id, { email: 'cost@example.com' });
+
+    await unsubscribeSubscriber({
+      subscriberId: sub._id,
+      source: 'one_click',
+      campaignId: campaign._id,
+    });
+
+    const doc = await (await campaignsCollection()).findOne({ _id: campaign._id });
+    expect(doc?.counts.unsubscribed).toBe(1);
+  });
+
+  it('does not let a retried one-click unsubscribe inflate the campaign count', async () => {
+    const { campaignsCollection } = await import('@/lib/db/collections');
+    const { createCampaign } = await import('@tests/helpers/factories');
+    const campaign = await createCampaign(list._id);
+    const sub = await createSubscriber(list._id, { email: 'retry@example.com' });
+
+    for (let i = 0; i < 3; i += 1) {
+      await unsubscribeSubscriber({
+        subscriberId: sub._id,
+        source: 'one_click',
+        campaignId: campaign._id,
+      });
+    }
+
+    const doc = await (await campaignsCollection()).findOne({ _id: campaign._id });
+    expect(doc?.counts.unsubscribed).toBe(1);
+  });
 });
 
 describe('resubscribe', () => {

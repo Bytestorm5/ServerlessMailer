@@ -1,5 +1,5 @@
 import { ObjectId, type Filter } from 'mongodb';
-import { subscribersCollection } from '@/lib/db/collections';
+import { campaignsCollection, subscribersCollection } from '@/lib/db/collections';
 import { config } from '@/lib/config';
 import { hashConfirmToken } from '@/lib/crypto/tokens';
 import { normalizeAndValidate } from '@/lib/email/normalize';
@@ -227,6 +227,16 @@ export async function unsubscribeSubscriber(input: {
       },
     },
   );
+
+  // Attribute the opt-out to the campaign that prompted it, so a campaign's
+  // report shows what it cost. Only counted on the transition, so a provider
+  // retrying a one-click unsubscribe cannot inflate it.
+  if (input.campaignId) {
+    await (await campaignsCollection()).updateOne(
+      { _id: input.campaignId },
+      { $inc: { 'counts.unsubscribed': 1 } },
+    );
+  }
 
   // Deliberately NOT added to `suppressions` (§9): unsubscribe is a per-list
   // preference, suppression is for deliverability failures. Both exclude from

@@ -11,11 +11,23 @@ import type { MergeFieldOption } from '@/components/editor/EditorToolbar';
 import type { PreviewSubscriber } from '@/components/campaign/CampaignPreview';
 import type { CampaignCounts, CampaignStatus, PresendResult } from '@/lib/types';
 
+export interface FailedBatchSummary {
+  id: string;
+  recipients: number;
+  attempts: number;
+  lastError: string;
+}
+
 export interface CampaignWorkspaceProps {
   campaignId: string;
   status: CampaignStatus;
   pausedReason: string | null;
   counts: CampaignCounts;
+  /** Report extras; all optional so a caller can render progress alone. */
+  trackOpens?: boolean;
+  trackClicks?: boolean;
+  failedBatches?: FailedBatchSummary[];
+  topLinks?: { url: string; clicks: number }[];
   initialDraft: CampaignDraft;
   list: { name: string; fromName: string; fromEmail: string; replyTo: string };
   mergeFields: MergeFieldOption[];
@@ -62,6 +74,9 @@ export function CampaignWorkspace(props: CampaignWorkspaceProps) {
     }
   }
 
+  const failedBatches = props.failedBatches ?? [];
+  const topLinks = props.topLinks ?? [];
+
   if (!editable) {
     const percent =
       props.counts.recipients > 0
@@ -102,10 +117,73 @@ export function CampaignWorkspace(props: CampaignWorkspaceProps) {
             <dd>{props.counts.complained.toLocaleString('en-GB')}</dd>
           </div>
           <div className="sm-card">
+            <dt>Unsubscribed</dt>
+            <dd>{props.counts.unsubscribed.toLocaleString('en-GB')}</dd>
+          </div>
+          <div className={`sm-card${props.counts.failed > 0 ? ' is-warning' : ''}`}>
             <dt>Failed</dt>
             <dd>{props.counts.failed.toLocaleString('en-GB')}</dd>
           </div>
+          {props.trackOpens && (
+            <div className="sm-card">
+              <dt>Opened</dt>
+              <dd>{props.counts.opened.toLocaleString('en-GB')}</dd>
+              {/* Apple Mail Privacy Protection pre-fetches images, so this is a
+                  soft signal rather than a precise figure (spec section 13). */}
+              <p className="muted">Inflated by Apple Mail Privacy Protection — treat as approximate</p>
+            </div>
+          )}
+          {props.trackClicks && (
+            <div className="sm-card">
+              <dt>Clicked</dt>
+              <dd>{props.counts.clicked.toLocaleString('en-GB')}</dd>
+            </div>
+          )}
         </dl>
+
+        {topLinks.length > 0 && (
+          <>
+            <h2 style={{ fontSize: '1rem' }}>Top clicked links</h2>
+            <table className="sm-table">
+              <tbody>
+                {topLinks.map((link) => (
+                  <tr key={link.url}>
+                    <td style={{ wordBreak: 'break-all' }}>{link.url}</td>
+                    <td>{link.clicks.toLocaleString('en-GB')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+
+        {failedBatches.length > 0 && (
+          <section aria-label="Failed batches">
+            <h2 style={{ fontSize: '1rem' }}>Failed batches</h2>
+            <p className="muted">
+              These reached the retry limit and were not sent. Inspect the error, fix the
+              cause, and re-send to the remaining recipients.
+            </p>
+            <table className="sm-table">
+              <thead>
+                <tr>
+                  <th>Recipients</th>
+                  <th>Attempts</th>
+                  <th>Last error</th>
+                </tr>
+              </thead>
+              <tbody>
+                {failedBatches.map((batch) => (
+                  <tr key={batch.id}>
+                    <td>{batch.recipients}</td>
+                    <td>{batch.attempts}</td>
+                    <td>{batch.lastError}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        )}
 
         {/* A single prominent control (§7.7). Pausing stops sending within one
             minute with no in-flight work lost. */}

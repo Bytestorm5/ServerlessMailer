@@ -1,6 +1,12 @@
 import { notFound } from 'next/navigation';
 import { ObjectId } from 'mongodb';
-import { campaignsCollection, listsCollection, subscribersCollection } from '@/lib/db/collections';
+import {
+  campaignBatchesCollection,
+  campaignsCollection,
+  eventsCollection,
+  listsCollection,
+  subscribersCollection,
+} from '@/lib/db/collections';
 import { listCampaignVersions } from '@/lib/campaigns';
 import { config } from '@/lib/config';
 import { AVAILABLE_MERGE_FIELDS } from '@/lib/merge';
@@ -26,12 +32,41 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
 
   const versions = await listCampaignVersions(campaign._id, 20);
 
+  // Failed batches are surfaced with their lastError for manual review (§7.6),
+  // and the top clicked links complete the campaign report (§13).
+  const failedBatches = await (await campaignBatchesCollection())
+    .find({ campaignId: campaign._id, status: 'failed' })
+    .limit(50)
+    .toArray();
+
+  const topLinks = campaign.trackClicks
+    ? await (await eventsCollection())
+        .aggregate<{ _id: string; clicks: number }>([
+          { $match: { campaignId: campaign._id, type: 'click' } },
+          { $group: { _id: '$url', clicks: { $sum: 1 } } },
+          { $sort: { clicks: -1 } },
+          { $limit: 10 },
+        ])
+        .toArray()
+    : [];
+
   return (
     <CampaignWorkspace
       campaignId={campaign._id.toHexString()}
       status={campaign.status}
       pausedReason={campaign.pausedReason ?? null}
       counts={campaign.counts}
+      trackOpens={campaign.trackOpens}
+      trackClicks={campaign.trackClicks}
+      failedBatches={failedBatches.map((batch) => ({
+        id: batch._id.toHexString(),
+        recipients: batch.subscriberIds.length,
+        attempts: batch.attempts,
+        lastError: batch.lastError ?? 'no error recorded',
+      }))}
+      topLinks={topLinks
+        .filter((row) => typeof row._id === 'string')
+        .map((row) => ({ url: row._id, clicks: row.clicks }))}
       initialDraft={{
         subject: campaign.subject,
         preheader: campaign.preheader,
