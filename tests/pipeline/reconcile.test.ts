@@ -97,10 +97,15 @@ describe('reconcileCompletedCampaigns', () => {
     expect(doc?.completedAt).toEqual(original);
   });
 
-  it('completes a sending campaign that has no batches at all', async () => {
+  it('leaves a sending campaign with no batches alone, because it is mid-freeze', async () => {
+    // Freeze flips the status to `sending` before materialising batches, so a
+    // partially-frozen campaign is never claimable. A campaign in that window
+    // has zero batches; completing it would silently drop every recipient.
     const campaign = await createCampaign(list._id, { status: 'sending' });
-    const completed = await reconcileCompletedCampaigns();
-    expect(completed.map(String)).toEqual([campaign._id.toHexString()]);
+
+    expect(await reconcileCompletedCampaigns()).toEqual([]);
+    const doc = await (await campaignsCollection()).findOne({ _id: campaign._id });
+    expect(doc?.status).toBe('sending');
   });
 
   it('handles several campaigns in one pass', async () => {

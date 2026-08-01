@@ -441,7 +441,7 @@ export function renderMergeFields(text: string, data: Record<string, string>): s
 export function findMergeFieldsWithoutFallback(text: string): MergeFieldRef[] {
   return parseMergeFields(text).filter(
     (ref) =>
-      !SYSTEM_FIELDS.has(ref.field) && (ref.fallback === null),
+      !SYSTEM_FIELDS.has(ref.field) && (ref.fallback === null || ref.fallback.trim() === ''),
   );
 }
 

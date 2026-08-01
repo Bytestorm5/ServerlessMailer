@@ -33,6 +33,13 @@ export async function reconcileCompletedCampaigns(
     });
     if (outstanding > 0) continue;
 
+    // A `sending` campaign with no batches at all is mid-freeze: the status is
+    // flipped before the batches are materialised, so that a partially-frozen
+    // campaign is never claimable. Completing it here would silently drop every
+    // recipient, so it is left alone until its batches appear.
+    const total = await batches.countDocuments({ campaignId: campaign._id });
+    if (total === 0) continue;
+
     // Guarded on status so a concurrent pause between the read above and this
     // write cannot be overwritten by a stale completion.
     const result = await campaigns.updateOne(
