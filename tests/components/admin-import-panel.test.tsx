@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ImportPanel } from '@/components/admin/ImportPanel';
 
@@ -38,7 +38,7 @@ function okResult(overrides: Record<string, unknown> = {}) {
 }
 
 function stubFetch(response: unknown, status = 200) {
-  const fetchMock = vi.fn(async () => ({
+  const fetchMock = vi.fn(async (_url: unknown, _init?: unknown) => ({
     ok: status >= 200 && status < 300,
     status,
     json: async () => response,
@@ -48,7 +48,7 @@ function stubFetch(response: unknown, status = 200) {
 }
 
 function sentBody(fetchMock: ReturnType<typeof stubFetch>): ImportBody {
-  const init = fetchMock.mock.calls.at(-1)![1] as unknown as RequestInit;
+  const init = fetchMock.mock.calls.at(-1)![1] as RequestInit;
   return JSON.parse(String(init.body)) as ImportBody;
 }
 
@@ -122,6 +122,63 @@ describe('ImportPanel — choosing a file and mapping columns', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(sentBody(fetchMock).mapping.attributes).toEqual({ 'first name': 'first_name' });
+  });
+
+  it('strips the BOM Excel puts in front of the header row', async () => {
+    // A mapping of "﻿email" matches no column server-side, so an entire
+    // 33,000-row Excel export would import as zero rows.
+    const fetchMock = stubFetch(okResult());
+    const { user, importButton } = await setup({
+      csv: '﻿email,first name\nada@example.com,Ada',
+    });
+
+    expect(screen.getByLabelText(/email column/i)).toHaveValue('email');
+    await user.click(importButton());
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(sentBody(fetchMock).mapping.email).toBe('email');
+  });
+
+  it('unwraps quoted header cells', async () => {
+    const fetchMock = stubFetch(okResult());
+    const { user, importButton } = await setup({
+      csv: '"email","first name"\n"ada@example.com","Ada"',
+    });
+
+    await user.click(importButton());
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(sentBody(fetchMock).mapping.email).toBe('email');
+  });
+
+  it('falls back to the first column when no header looks like an address', async () => {
+    await setup({ csv: 'contact,city\nada@example.com,London' });
+
+    expect(screen.getByLabelText(/email column/i)).toHaveValue('contact');
+  });
+
+  it('keeps the loaded file when the operator opens the picker and cancels', async () => {
+    const fetchMock = stubFetch(okResult());
+    const { user, importButton } = await setup();
+
+    fireEvent.change(screen.getByLabelText(/csv file/i), { target: { files: [] } });
+
+    expect(screen.getByLabelText(/email column/i)).toBeInTheDocument();
+    await user.click(importButton());
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(sentBody(fetchMock).csv).toBe(CSV);
+  });
+
+  it('needs no list picker when there is only one list, and uses it', async () => {
+    const fetchMock = stubFetch(okResult());
+    const { user, importButton } = await setup({ lists: [LISTS[0]] });
+
+    expect(screen.queryByLabelText(/^list$/i)).toBeNull();
+    await user.click(importButton());
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(sentBody(fetchMock).listId).toBe(LISTS[0].id);
   });
 
   it('lets the operator override the guessed email column', async () => {
@@ -288,6 +345,16 @@ describe('ImportPanel — reporting the outcome', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       /requires an explicit attestation/i,
     );
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('still says something when a rejection carries no message', async () => {
+    stubFetch({ ok: false }, 500);
+    const { user, importButton } = await setup();
+
+    await user.click(importButton());
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/import failed/i);
     expect(screen.queryByRole('status')).toBeNull();
   });
 

@@ -540,6 +540,30 @@ describe('CampaignWorkspace — wiring the draft editor to the admin API', () =>
     expect(fetchMock).toHaveBeenCalled();
   });
 
+  it('names the status code when a failed save carries no usable body', async () => {
+    // e.g. a proxy returning an HTML error page: still a lost edit, and the
+    // writer has to be told.
+    stubFetch((url, init) => {
+      if (url.includes('/preview')) return json(200, { html: '<p>x</p>', text: 'x' });
+      if (init.method === 'PATCH') {
+        return {
+          ok: false,
+          status: 503,
+          json: async () => {
+            throw new SyntaxError('Unexpected token <');
+          },
+        };
+      }
+      return json(200, { ok: true });
+    });
+    const user = userEvent.setup();
+    renderWorkspace('draft');
+
+    await user.type(await screen.findByLabelText(/subject line/i), '!');
+
+    expect(await screen.findByText(/not saved/i, {}, { timeout: 5000 })).toHaveTextContent('503');
+  });
+
   it('validates through the pre-send gate and then posts {action:"send"}', async () => {
     const fetchMock = stubFetch(draftFetch);
     const user = userEvent.setup();
