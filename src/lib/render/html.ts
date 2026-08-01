@@ -56,19 +56,20 @@ const DEFAULT_HEADING_LEVEL = 2;
  * than classes because MJML puts `css-class` on the wrapper cell, not on the
  * `<h2>` or `<a>` inside it.
  */
-const INLINE_STYLES = `
-    h1, h2, h3, h4, h5, h6 { margin: 0 0 12px; line-height: 1.25; color: #111111; font-weight: 700; }
-    h1 { font-size: 28px; }
-    h2 { font-size: 22px; }
-    h3 { font-size: 18px; }
-    h4, h5, h6 { font-size: 16px; }
-    p { margin: 0 0 16px; }
-    ul, ol { margin: 0 0 16px; padding-left: 22px; }
-    li { margin: 0 0 6px; }
-    blockquote { margin: 0 0 16px; padding: 4px 0 4px 16px; border-left: 3px solid #d4d4d8; color: #52525b; font-style: italic; }
-    a { color: #1d4ed8; text-decoration: underline; }
-    .sm-footer-text { font-size: 12px; line-height: 1.5; color: #6b7280; }
-`.trim();
+const INLINE_STYLES = [
+  'h1, h2, h3, h4, h5, h6 { margin: 0 0 12px; line-height: 1.25; color: #111111; font-weight: 700; }',
+  'h1 { font-size: 28px; }',
+  'h2 { font-size: 22px; }',
+  'h3 { font-size: 18px; }',
+  'h4, h5, h6 { font-size: 16px; }',
+  'p { margin: 0 0 16px; }',
+  'ul, ol { margin: 0 0 16px; padding-left: 22px; }',
+  'li { margin: 0 0 6px; }',
+  'blockquote { margin: 0 0 16px; padding: 4px 0 4px 16px;' +
+    ' border-left: 3px solid #d4d4d8; color: #52525b; font-style: italic; }',
+  'a { color: #1d4ed8; text-decoration: underline; }',
+  '.sm-footer-text { font-size: 12px; line-height: 1.5; color: #6b7280; }',
+].join('\n');
 
 /* ------------------------------------------------------------- primitives */
 
@@ -284,7 +285,16 @@ function renderBody(doc: EditorDoc | undefined): string {
   return nodes
     .map(renderTopLevel)
     .filter((chunk) => chunk !== '')
-    .join('\n          ');
+    .join('\n');
+}
+
+/** Keeps the emitted MJML legible; purely cosmetic, MJML ignores whitespace. */
+function indent(block: string, depth: number): string {
+  const pad = '  '.repeat(depth);
+  return block
+    .split('\n')
+    .map((line) => (line === '' ? line : pad + line))
+    .join('\n');
 }
 
 /* --------------------------------------------------------------- the chrome */
@@ -311,11 +321,11 @@ function footerSection(chrome: EmailChrome, unsubscribeUrl: string): string {
 
   return [
     '<mj-section padding="0 0 24px">',
-    '        <mj-column>',
-    '          <mj-divider border-width="1px" border-color="#e5e5e5" padding="12px 25px" />',
-    `          <mj-text css-class="sm-footer-text">${lines}</mj-text>`,
-    '        </mj-column>',
-    '      </mj-section>',
+    '  <mj-column>',
+    '    <mj-divider border-width="1px" border-color="#e5e5e5" padding="12px 25px" />',
+    `    <mj-text css-class="sm-footer-text">${lines}</mj-text>`,
+    '  </mj-column>',
+    '</mj-section>',
   ].join('\n');
 }
 
@@ -346,33 +356,35 @@ export function docToMjml(doc: EditorDoc, chrome: EmailChrome): string {
     // the inbox shows next to the subject.
     preheader ? `<mj-preview>${escapeHtml(preheader)}</mj-preview>` : '',
     '<mj-attributes>',
-    '      <mj-all font-family="Helvetica, Arial, sans-serif" />',
-    '      <mj-text font-size="16px" line-height="1.6" color="#1a1a1a" padding="8px 25px" />',
-    '    </mj-attributes>',
-    `<mj-style inline="inline">\n${INLINE_STYLES}\n    </mj-style>`,
+    '  <mj-all font-family="Helvetica, Arial, sans-serif" />',
+    '  <mj-text font-size="16px" line-height="1.6" color="#1a1a1a" padding="8px 25px" />',
+    '</mj-attributes>',
+    '<mj-style inline="inline">',
+    indent(INLINE_STYLES, 1),
+    '</mj-style>',
   ]
     .filter((line) => line !== '')
-    .join('\n    ');
+    .join('\n');
 
   const bodySection = body
     ? [
         '<mj-section background-color="#ffffff" padding="24px 0 8px">',
-        '        <mj-column>',
-        `          ${body}`,
-        '        </mj-column>',
-        '      </mj-section>',
+        '  <mj-column>',
+        indent(body, 2),
+        '  </mj-column>',
+        '</mj-section>',
       ].join('\n')
     : '';
 
   return [
     '<mjml>',
     '  <mj-head>',
-    `    ${head}`,
+    indent(head, 2),
     '  </mj-head>',
     '  <mj-body background-color="#f4f4f5">',
-    ...(bodySection ? [`      ${bodySection}`] : []),
-    `      ${footerSection(chrome, unsubscribeUrl)}`,
-    ...(pixelUrl ? [`      ${openPixel(pixelUrl)}`] : []),
+    ...(bodySection ? [indent(bodySection, 2)] : []),
+    indent(footerSection(chrome, unsubscribeUrl), 2),
+    ...(pixelUrl ? [indent(openPixel(pixelUrl), 2)] : []),
     '  </mj-body>',
     '</mjml>',
   ].join('\n');
