@@ -1,6 +1,7 @@
 import { badRequest, readJson, toObjectId, withAdmin } from '@/lib/api/guard';
 import { createCampaign } from '@/lib/campaigns';
 import { campaignsCollection, listsCollection } from '@/lib/db/collections';
+import { CAMPAIGN_STATUSES, type CampaignStatus } from '@/lib/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -8,7 +9,10 @@ export const dynamic = 'force-dynamic';
 export const GET = withAdmin(async (request) => {
   const url = new URL(request.url);
   const listId = toObjectId(url.searchParams.get('listId') ?? undefined);
-  const status = url.searchParams.get('status') ?? undefined;
+  const statusParam = url.searchParams.get('status') ?? undefined;
+  const status = CAMPAIGN_STATUSES.includes(statusParam as CampaignStatus)
+    ? (statusParam as CampaignStatus)
+    : undefined;
 
   const campaigns = await (await campaignsCollection())
     .find({

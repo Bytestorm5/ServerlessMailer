@@ -13,10 +13,9 @@ export function setSesAdapter(adapter: SesAdapter | undefined): void {
 
 export async function getSesAdapter(): Promise<SesAdapter> {
   if (override) return override;
-  if (!cachedReal) {
-    const { createAwsSesAdapter } = await import('@/lib/ses/aws');
-    cachedReal = createAwsSesAdapter();
-  }
+  if (cachedReal) return cachedReal;
+  const { createAwsSesAdapter } = await import('@/lib/ses/aws');
+  cachedReal = createAwsSesAdapter();
   return cachedReal;
 }
 

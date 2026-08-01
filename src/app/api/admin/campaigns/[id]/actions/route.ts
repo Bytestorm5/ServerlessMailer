@@ -42,7 +42,7 @@ export const POST = withAdmin<Ctx>(async (request, ctx) => {
           { status: 409 },
         );
       }
-      return Response.json({ ok: true, ...result });
+      return Response.json({ ok: true, recipients: result.recipients, batches: result.batches });
     }
 
     case 'schedule': {

@@ -17,6 +17,16 @@ import { isSuppressed } from '@/lib/suppressions';
 import { createCampaign, createList, createSubscriber } from '@tests/helpers/factories';
 import type { CampaignDoc, ListDoc, SubscriberDoc } from '@/lib/types';
 
+/** Narrows the handler's union so a test can assert on the action it took. */
+function handled(
+  result: { handled: true; action: string } | { handled: false; reason: string },
+): { handled: true; action: string } {
+  if (!result.handled) {
+    throw new Error(`expected the notification to be handled, got: ${result.reason}`);
+  }
+  return result;
+}
+
 let list: ListDoc;
 let campaign: CampaignDoc;
 let subscriber: SubscriberDoc;
@@ -172,7 +182,7 @@ describe('Bounce handling', () => {
       ),
     );
 
-    expect(result.action).toBe('bounce_transient');
+    expect(handled(result).action).toBe('bounce_transient');
     expect(await isSuppressed('reader@example.com')).toBe(false);
     expect(await statusOf(subscriber._id)).toBe('confirmed');
   });
@@ -235,7 +245,7 @@ describe('Delivery and Reject', () => {
       notification(sesEvent('Delivery', { delivery: { recipients: ['reader@example.com'] } })),
     );
 
-    expect(result.action).toBe('delivery');
+    expect(handled(result).action).toBe('delivery');
     expect((await countsOf(campaign._id))?.delivered).toBe(1);
   });
 
@@ -244,7 +254,7 @@ describe('Delivery and Reject', () => {
       notification(sesEvent('Reject', { reject: { reason: 'Bad content' } })),
     );
 
-    expect(result.action).toBe('reject');
+    expect(handled(result).action).toBe('reject');
     // A reject indicates a configuration problem, not a recipient problem, so
     // the recipient must not be penalised for it.
     expect(await isSuppressed('reader@example.com')).toBe(false);
@@ -330,7 +340,7 @@ describe('malformed input', () => {
       }),
     );
 
-    expect(result.action).toBe('complaint');
+    expect(handled(result).action).toBe('complaint');
   });
 
   it('handles a bounce with several recipients', async () => {
