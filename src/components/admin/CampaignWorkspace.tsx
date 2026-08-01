@@ -57,11 +57,19 @@ async function jsonOrThrow(response: Response) {
 export function CampaignWorkspace(props: CampaignWorkspaceProps) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const editable = props.status === 'draft' || props.status === 'scheduled';
 
+  /**
+   * Every lifecycle action goes through here, and a failure is always shown.
+   * Pause is the last line of defence during a live 19,000-recipient send
+   * (§7.7): a silent failure would look exactly like success while the send
+   * carried on.
+   */
   async function action(body: Record<string, unknown>) {
     setBusy(true);
+    setActionError(null);
     try {
       await jsonOrThrow(
         await fetch(`/api/admin/campaigns/${props.campaignId}/actions`, {
@@ -71,10 +79,18 @@ export function CampaignWorkspace(props: CampaignWorkspaceProps) {
         }),
       );
       router.refresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+      throw err;
     } finally {
       setBusy(false);
     }
   }
+
+  /** Click handler wrapper: reports the failure and swallows the rejection. */
+  const run = (body: Record<string, unknown>) => () => {
+    void action(body).catch(() => {});
+  };
 
   const failedBatches = props.failedBatches ?? [];
   const topLinks = props.topLinks ?? [];
@@ -94,6 +110,11 @@ export function CampaignWorkspace(props: CampaignWorkspaceProps) {
         {props.pausedReason && (
           <p role="alert" className="sm-modal-blockers">
             {props.pausedReason}
+          </p>
+        )}
+        {actionError && (
+          <p role="alert" className="sm-modal-blockers">
+            That did not work: {actionError}. The campaign is unchanged — try again.
           </p>
         )}
 
@@ -194,7 +215,7 @@ export function CampaignWorkspace(props: CampaignWorkspaceProps) {
             type="button"
             className="sm-primary"
             disabled={busy}
-            onClick={() => action({ action: 'pause', reason: 'Paused by an operator' })}
+            onClick={run({ action: 'pause', reason: 'Paused by an operator' })}
           >
             Pause sending
           </button>
@@ -203,7 +224,7 @@ export function CampaignWorkspace(props: CampaignWorkspaceProps) {
           <button
             type="button"
             disabled={busy}
-            onClick={() => action({ action: 'resume' })}
+            onClick={run({ action: 'resume' })}
           >
             Resume sending
           </button>

@@ -6,6 +6,9 @@ import { POST as previewPost } from '@/app/api/admin/campaigns/[id]/preview/rout
 import { GET as cronSend } from '@/app/api/cron/send/route';
 import { GET as cronPurge } from '@/app/api/cron/purge/route';
 import { GET as clickRedirect } from '@/app/api/t/c/[token]/route';
+import { POST as importPost } from '@/app/api/admin/import/route';
+import { withAdmin } from '@/lib/api/guard';
+import { importAttestationsCollection } from '@/lib/db/collections';
 import { ADMIN_COOKIE_NAME, createSessionToken } from '@/lib/auth';
 import { buildClickToken } from '@/lib/crypto/tokens';
 import {
@@ -271,5 +274,95 @@ describe('click redirect allowlist', () => {
 
     expect(response.status).toBe(302);
     expect(response.headers.get('location')).toBe('https://example.com/post');
+  });
+});
+
+
+describe('withAdmin never lets a handler escape', () => {
+  it('returns 500 even when the handler rejects with a bare null', async () => {
+    // Reading `.message` off a non-Error would throw inside the catch, so the
+    // wrapper would escape without returning the 500 it exists to guarantee.
+    const handler = withAdmin(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      throw null;
+    });
+
+    const response = await handler(
+      new Request('https://mail.example.com/api/admin/anything', { headers: AUTH }),
+      undefined,
+    );
+
+    expect(response.status).toBe(500);
+    expect((await response.json()).error).toBe('internal error');
+  });
+
+  it('returns 500 without leaking the handler error', async () => {
+    const handler = withAdmin(async () => {
+      throw new Error('connection string is mongodb+srv://user:hunter2@host');
+    });
+
+    const response = await handler(
+      new Request('https://mail.example.com/api/admin/anything', { headers: AUTH }),
+      undefined,
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.text()).not.toContain('hunter2');
+  });
+});
+
+describe('the import route checks the list exists', () => {
+  function importRequest(body: Record<string, unknown>) {
+    return importPost(
+      new Request('https://mail.example.com/api/admin/import', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...AUTH },
+        body: JSON.stringify(body),
+      }),
+      undefined,
+    );
+  }
+
+  it('rejects a well-formed id that names no list', async () => {
+    // Otherwise the import creates subscribers nobody can see and nobody can
+    // ever send to, plus a consent record against a list that does not exist.
+    const response = await importRequest({
+      listId: new ObjectId().toHexString(),
+      csv: 'email\na@example.com\n',
+      mapping: { email: 'email' },
+    });
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe('unknown list');
+    expect(await (await subscribersCollection()).countDocuments()).toBe(0);
+    expect(await (await importAttestationsCollection()).countDocuments()).toBe(0);
+  });
+
+  it('refuses to treat a whitespace-only attester as an attestation', async () => {
+    // The attestation is the legal record for importing addresses as confirmed.
+    const response = await importRequest({
+      listId: list._id.toHexString(),
+      csv: 'email\na@example.com\n',
+      mapping: { email: 'email' },
+      markConfirmed: true,
+      attestation: { text: 'prior consent held', by: '   ' },
+    });
+
+    expect(response.status).toBe(400);
+    expect(await (await subscribersCollection()).countDocuments()).toBe(0);
+  });
+
+  it('accepts a genuine attestation', async () => {
+    const response = await importRequest({
+      listId: list._id.toHexString(),
+      csv: 'email\na@example.com\n',
+      mapping: { email: 'email' },
+      markConfirmed: true,
+      attestation: { text: 'prior consent held', by: 'operator@example.com' },
+    });
+
+    expect(response.status).toBe(200);
+    const doc = await (await subscribersCollection()).findOne({ email: 'a@example.com' });
+    expect(doc?.status).toBe('confirmed');
   });
 });

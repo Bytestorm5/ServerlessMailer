@@ -132,12 +132,20 @@ export function CampaignEditorScreen(props: CampaignEditorScreenProps) {
   }, []);
 
   const openSendDialog = useCallback(async () => {
-    // Save first: sending a campaign whose latest edit never reached the server
-    // is exactly the mistake this screen exists to prevent.
-    await saveNow();
-    const result = await props.onValidate();
-    setGate(result);
-    setConfirming(true);
+    setNotice(null);
+    try {
+      // Save first: sending a campaign whose latest edit never reached the
+      // server is exactly the mistake this screen exists to prevent.
+      await saveNow();
+      const result = await props.onValidate();
+      setGate(result);
+      setConfirming(true);
+    } catch (err) {
+      // Never leave the operator staring at a button that silently did nothing.
+      setNotice(
+        `Could not check this campaign: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }, [props, saveNow]);
 
   const saveLabel = useMemo(() => {
@@ -177,7 +185,7 @@ export function CampaignEditorScreen(props: CampaignEditorScreenProps) {
             {saveLabel}
             {status === 'error' && saveError ? `: ${saveError}` : ''}
           </span>
-          <button type="button" onClick={openSendDialog}>
+          <button type="button" onClick={() => void openSendDialog()}>
             Review and send
           </button>
         </div>
@@ -213,9 +221,16 @@ export function CampaignEditorScreen(props: CampaignEditorScreenProps) {
               type="button"
               disabled={!testAddress}
               onClick={async () => {
-                await saveNow();
-                await props.onTestSend([testAddress]);
-                setNotice(`Test sent to ${testAddress}`);
+                setNotice(null);
+                try {
+                  await saveNow();
+                  await props.onTestSend([testAddress]);
+                  setNotice(`Test sent to ${testAddress}`);
+                } catch (err) {
+                  setNotice(
+                    `Test send failed: ${err instanceof Error ? err.message : String(err)}`,
+                  );
+                }
               }}
             >
               Send test
@@ -236,7 +251,15 @@ export function CampaignEditorScreen(props: CampaignEditorScreenProps) {
                     <span>{new Date(version.createdAt).toLocaleString('en-GB')}</span>
                     <button
                       type="button"
-                      onClick={() => props.onRestoreVersion(version.id)}
+                      onClick={() => {
+                        void props.onRestoreVersion(version.id).catch((err: unknown) => {
+                          setNotice(
+                            `Restore failed: ${
+                              err instanceof Error ? err.message : String(err)
+                            }`,
+                          );
+                        });
+                      }}
                     >
                       Restore
                     </button>
@@ -269,9 +292,13 @@ export function CampaignEditorScreen(props: CampaignEditorScreenProps) {
         typedConfirmationThreshold={props.typedConfirmationThreshold}
         checks={gate?.checks ?? []}
         onCancel={() => setConfirming(false)}
-        onConfirm={async () => {
+        onConfirm={() => {
           setConfirming(false);
-          await props.onSend();
+          void props.onSend().catch((err: unknown) => {
+            setNotice(
+              `Send failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          });
         }}
       />
     </div>

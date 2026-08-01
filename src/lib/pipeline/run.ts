@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { sendPendingConfirmations } from '@/lib/confirmations';
 import { campaignsCollection } from '@/lib/db/collections';
 import { config } from '@/lib/config';
 import { logger } from '@/lib/logging';
@@ -18,6 +19,7 @@ export interface CronRunSummary {
   scheduledStarted: string[];
   completedCampaigns: string[];
   pausedCampaigns: string[];
+  confirmationsSent: number;
   durationMs: number;
 }
 
@@ -53,8 +55,20 @@ export async function runSendCycle(
     scheduledStarted: [],
     completedCampaigns: [],
     pausedCampaigns: [],
+    confirmationsSent: 0,
     durationMs: 0,
   };
+
+  // Subscribers imported without a prior-consent attestation land as `pending`
+  // and must receive a confirmation email (§4.3). Import cannot send those
+  // inline, so they drain here, bounded per tick.
+  try {
+    const confirmations = await sendPendingConfirmations({ limit: 50, now });
+    summary.confirmationsSent = confirmations.sent;
+  } catch (err) {
+    // Never let this stop the campaign send, which is the cron's main job.
+    logger.error('pending confirmations failed', { error: (err as Error).message });
+  }
 
   // Promote any scheduled campaign whose time has come. Freeze is what moves it
   // into `sending`; until then its batches do not exist and nothing is claimable.

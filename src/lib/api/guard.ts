@@ -26,9 +26,12 @@ export function withAdmin<C>(handler: AdminHandler<C>): AdminHandler<C> {
       }
       return await handler(request, ctx);
     } catch (err) {
+      // Not `(err as Error).message`: a handler that rejects with a bare null
+      // would make the dereference throw *inside* the catch, so withAdmin would
+      // escape without returning the 500 this block exists to guarantee.
       logger.error('admin route failed', {
         path: new URL(request.url).pathname,
-        error: (err as Error).message,
+        error: err instanceof Error ? err.message : String(err),
       });
       return Response.json({ ok: false, error: 'internal error' }, { status: 500 });
     }

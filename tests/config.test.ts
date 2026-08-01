@@ -41,36 +41,48 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // Guards the guard: a case that leaks an env change would poison the rest of
+  // Guards the guard: a case that leaked an env change would poison the rest of
   // the file (and hide a real failure behind an unrelated one).
   expect({ ...process.env }).toEqual(snapshot);
 });
 
-const REQUIRED: Array<[string, () => string, string]> = [
-  ['mongoUri', () => config.mongoUri(), 'MONGODB_URI'],
-  ['cronSecret', () => config.cronSecret(), 'CRON_SECRET'],
-  ['confirmTokenSecret', () => config.confirmTokenSecret(), 'CONFIRM_TOKEN_SECRET'],
-  ['unsubscribeSecret', () => config.unsubscribeSecret(), 'UNSUBSCRIBE_SECRET'],
-  ['trackingSecret', () => config.trackingSecret(), 'TRACKING_SECRET'],
-  ['adminSessionSecret', () => config.adminSessionSecret(), 'ADMIN_SESSION_SECRET'],
-  ['adminPassword', () => config.adminPassword(), 'ADMIN_PASSWORD'],
-  ['appBaseUrl', () => config.appBaseUrl(), 'APP_BASE_URL'],
+const REQUIRED = [
+  { name: 'mongoUri', variable: 'MONGODB_URI', read: () => config.mongoUri() },
+  { name: 'cronSecret', variable: 'CRON_SECRET', read: () => config.cronSecret() },
+  {
+    name: 'confirmTokenSecret',
+    variable: 'CONFIRM_TOKEN_SECRET',
+    read: () => config.confirmTokenSecret(),
+  },
+  {
+    name: 'unsubscribeSecret',
+    variable: 'UNSUBSCRIBE_SECRET',
+    read: () => config.unsubscribeSecret(),
+  },
+  { name: 'trackingSecret', variable: 'TRACKING_SECRET', read: () => config.trackingSecret() },
+  {
+    name: 'adminSessionSecret',
+    variable: 'ADMIN_SESSION_SECRET',
+    read: () => config.adminSessionSecret(),
+  },
+  { name: 'adminPassword', variable: 'ADMIN_PASSWORD', read: () => config.adminPassword() },
+  { name: 'appBaseUrl', variable: 'APP_BASE_URL', read: () => config.appBaseUrl() },
 ];
 
 describe('required variables', () => {
-  it.each(REQUIRED)('%s throws and names %s when it is unset', (_name, read, variable) => {
+  it.each(REQUIRED)('$name throws and names $variable when it is unset', ({ variable, read }) => {
     withEnv({ [variable]: undefined }, () => {
       expect(read).toThrow(`Missing required environment variable: ${variable}`);
     });
   });
 
-  it.each(REQUIRED)('%s throws when %s is set to an empty string', (_name, read, variable) => {
+  it.each(REQUIRED)('$name throws when $variable is an empty string', ({ variable, read }) => {
     withEnv({ [variable]: '' }, () => {
       expect(read).toThrow(`Missing required environment variable: ${variable}`);
     });
   });
 
-  it.each(REQUIRED)('%s returns the configured value of %s', (_name, read, variable) => {
+  it.each(REQUIRED)('$name returns the configured value of $variable', ({ variable, read }) => {
     withEnv({ [variable]: `value-for-${variable}` }, () => {
       expect(read()).toBe(`value-for-${variable}`);
     });
@@ -84,111 +96,153 @@ describe('required variables', () => {
     });
   });
 
-  it('does not fall back to a placeholder secret when the variable is missing', () => {
+  it('never falls back to a placeholder admin password', () => {
     withEnv({ ADMIN_PASSWORD: undefined }, () => {
       // Fail closed (§1.2): there is no default admin password, ever.
       let thrown: unknown;
+      let returned: unknown;
       try {
-        config.adminPassword();
+        returned = config.adminPassword();
       } catch (err) {
         thrown = err;
       }
+      expect(returned).toBeUndefined();
       expect(thrown).toBeInstanceOf(Error);
     });
   });
 });
 
-const OPTIONAL: Array<[string, () => string, string, string]> = [
-  ['mongoDb', () => config.mongoDb(), 'MONGODB_DB', 'newsletter'],
-  ['awsRegion', () => config.awsRegion(), 'AWS_REGION', 'us-east-1'],
+const OPTIONAL = [
+  {
+    name: 'mongoDb',
+    variable: 'MONGODB_DB',
+    fallback: 'newsletter',
+    read: () => config.mongoDb(),
+  },
+  {
+    name: 'awsRegion',
+    variable: 'AWS_REGION',
+    fallback: 'us-east-1',
+    read: () => config.awsRegion(),
+  },
 ];
 
 describe('optional variables', () => {
-  it.each(OPTIONAL)('%s falls back to "%s" default when %s is unset', (_n, read, variable, fallback) => {
+  it.each(OPTIONAL)('$name falls back to "$fallback" when $variable is unset', ({ variable, fallback, read }) => {
     withEnv({ [variable]: undefined }, () => {
       expect(read()).toBe(fallback);
     });
   });
 
-  it.each(OPTIONAL)('%s falls back to its default when %s is an empty string', (_n, read, variable, fallback) => {
+  it.each(OPTIONAL)('$name falls back to "$fallback" when $variable is an empty string', ({ variable, fallback, read }) => {
     withEnv({ [variable]: '' }, () => {
       expect(read()).toBe(fallback);
     });
   });
 
-  it.each(OPTIONAL)('%s prefers the configured value of %s', (_n, read, variable) => {
+  it.each(OPTIONAL)('$name prefers the configured value of $variable', ({ variable, read }) => {
     withEnv({ [variable]: 'configured' }, () => {
       expect(read()).toBe('configured');
     });
   });
 });
 
-const NUMERIC: Array<[string, () => number, string, number]> = [
-  ['sesMaxSendRate', () => config.sesMaxSendRate(), 'SES_MAX_SEND_RATE', 14],
-  ['maxBatchesPerRun', () => config.maxBatchesPerRun(), 'MAX_BATCHES_PER_RUN', 10],
-  ['cronBudgetMs', () => config.cronBudgetMs(), 'CRON_BUDGET_MS', 45_000],
-  ['batchLeaseMs', () => config.batchLeaseMs(), 'BATCH_LEASE_MS', 120_000],
-  ['maxBatchAttempts', () => config.maxBatchAttempts(), 'MAX_BATCH_ATTEMPTS', 5],
-  ['batchSize', () => config.batchSize(), 'BATCH_SIZE', 50],
-  [
-    'complaintCircuitBreakerRate',
-    () => config.complaintCircuitBreakerRate(),
-    'COMPLAINT_CIRCUIT_BREAKER_RATE',
-    0.001,
-  ],
-  [
-    'complaintCircuitBreakerMinDelivered',
-    () => config.complaintCircuitBreakerMinDelivered(),
-    'COMPLAINT_CIRCUIT_BREAKER_MIN_DELIVERED',
-    100,
-  ],
-  [
-    'typedConfirmationThreshold',
-    () => config.typedConfirmationThreshold(),
-    'TYPED_CONFIRMATION_THRESHOLD',
-    1000,
-  ],
-  ['pendingExpiryDays', () => config.pendingExpiryDays(), 'PENDING_EXPIRY_DAYS', 7],
-  [
-    'confirmResendIntervalMs',
-    () => config.confirmResendIntervalMs(),
-    'CONFIRM_RESEND_INTERVAL_MS',
-    3_600_000,
-  ],
-  [
-    'signupRateLimitPerIpPerHour',
-    () => config.signupRateLimitPerIpPerHour(),
-    'SIGNUP_RATE_LIMIT_IP_PER_HOUR',
-    20,
-  ],
-  [
-    'transientBounceSuppressionThreshold',
-    () => config.transientBounceSuppressionThreshold(),
-    'TRANSIENT_BOUNCE_SUPPRESSION_THRESHOLD',
-    3,
-  ],
+const NUMERIC = [
+  {
+    name: 'sesMaxSendRate',
+    variable: 'SES_MAX_SEND_RATE',
+    fallback: 14,
+    read: () => config.sesMaxSendRate(),
+  },
+  {
+    name: 'maxBatchesPerRun',
+    variable: 'MAX_BATCHES_PER_RUN',
+    fallback: 10,
+    read: () => config.maxBatchesPerRun(),
+  },
+  {
+    name: 'cronBudgetMs',
+    variable: 'CRON_BUDGET_MS',
+    fallback: 45_000,
+    read: () => config.cronBudgetMs(),
+  },
+  {
+    name: 'batchLeaseMs',
+    variable: 'BATCH_LEASE_MS',
+    fallback: 120_000,
+    read: () => config.batchLeaseMs(),
+  },
+  {
+    name: 'maxBatchAttempts',
+    variable: 'MAX_BATCH_ATTEMPTS',
+    fallback: 5,
+    read: () => config.maxBatchAttempts(),
+  },
+  { name: 'batchSize', variable: 'BATCH_SIZE', fallback: 50, read: () => config.batchSize() },
+  {
+    name: 'complaintCircuitBreakerRate',
+    variable: 'COMPLAINT_CIRCUIT_BREAKER_RATE',
+    fallback: 0.001,
+    read: () => config.complaintCircuitBreakerRate(),
+  },
+  {
+    name: 'complaintCircuitBreakerMinDelivered',
+    variable: 'COMPLAINT_CIRCUIT_BREAKER_MIN_DELIVERED',
+    fallback: 100,
+    read: () => config.complaintCircuitBreakerMinDelivered(),
+  },
+  {
+    name: 'typedConfirmationThreshold',
+    variable: 'TYPED_CONFIRMATION_THRESHOLD',
+    fallback: 1000,
+    read: () => config.typedConfirmationThreshold(),
+  },
+  {
+    name: 'pendingExpiryDays',
+    variable: 'PENDING_EXPIRY_DAYS',
+    fallback: 7,
+    read: () => config.pendingExpiryDays(),
+  },
+  {
+    name: 'confirmResendIntervalMs',
+    variable: 'CONFIRM_RESEND_INTERVAL_MS',
+    fallback: 3_600_000,
+    read: () => config.confirmResendIntervalMs(),
+  },
+  {
+    name: 'signupRateLimitPerIpPerHour',
+    variable: 'SIGNUP_RATE_LIMIT_IP_PER_HOUR',
+    fallback: 20,
+    read: () => config.signupRateLimitPerIpPerHour(),
+  },
+  {
+    name: 'transientBounceSuppressionThreshold',
+    variable: 'TRANSIENT_BOUNCE_SUPPRESSION_THRESHOLD',
+    fallback: 3,
+    read: () => config.transientBounceSuppressionThreshold(),
+  },
 ];
 
 describe('numeric variables', () => {
-  it.each(NUMERIC)('%s defaults to %# when %s is unset', (_n, read, variable, fallback) => {
+  it.each(NUMERIC)('$name defaults to $fallback when $variable is unset', ({ variable, fallback, read }) => {
     withEnv({ [variable]: undefined }, () => {
       expect(read()).toBe(fallback);
     });
   });
 
-  it.each(NUMERIC)('%s defaults when %s is an empty string', (_n, read, variable, fallback) => {
+  it.each(NUMERIC)('$name defaults to $fallback when $variable is an empty string', ({ variable, fallback, read }) => {
     withEnv({ [variable]: '' }, () => {
       expect(read()).toBe(fallback);
     });
   });
 
-  it.each(NUMERIC)('%s parses the configured value of %s', (_n, read, variable) => {
+  it.each(NUMERIC)('$name parses the configured value of $variable', ({ variable, read }) => {
     withEnv({ [variable]: '7' }, () => {
       expect(read()).toBe(7);
     });
   });
 
-  it.each(NUMERIC)('%s rejects a non-numeric %s, naming the variable and the value', (_n, read, variable) => {
+  it.each(NUMERIC)('$name rejects a non-numeric $variable, naming both', ({ variable, read }) => {
     withEnv({ [variable]: 'fourteen' }, () => {
       expect(read).toThrow(
         `Environment variable ${variable} must be a number, got "fourteen"`,
@@ -198,7 +252,7 @@ describe('numeric variables', () => {
 
   const badValues = ['abc', '12abc', 'NaN', 'Infinity', '-Infinity', '1,000', '0x', 'true'];
 
-  it.each(badValues)('rejects %s rather than silently producing NaN', (raw) => {
+  it.each(badValues)('rejects SES_MAX_SEND_RATE="%s" rather than producing NaN', (raw) => {
     withEnv({ SES_MAX_SEND_RATE: raw }, () => {
       // A NaN send rate would disable pacing entirely (§7.5) without a word.
       expect(() => config.sesMaxSendRate()).toThrow(/must be a number/);
@@ -208,7 +262,7 @@ describe('numeric variables', () => {
   it('honours an explicit 0 instead of treating it as unset', () => {
     withEnv({ MAX_BATCHES_PER_RUN: '0' }, () => {
       // "0" is falsy; a truthiness check here would silently restore the
-      // default and keep sending after an operator asked for a full stop.
+      // default of 10 and keep sending after an operator asked for a full stop.
       expect(config.maxBatchesPerRun()).toBe(0);
     });
   });
@@ -284,28 +338,40 @@ describe('appBaseUrl', () => {
   });
 });
 
-const PASSTHROUGH: Array<[string, () => string | undefined, string]> = [
-  ['turnstileSecret', () => config.turnstileSecret(), 'TURNSTILE_SECRET_KEY'],
-  ['unsubscribeMailto', () => config.unsubscribeMailto(), 'UNSUBSCRIBE_MAILTO'],
-  ['trackingUrlAllowlist', () => config.trackingUrlAllowlist(), 'TRACKING_URL_ALLOWLIST'],
+const PASSTHROUGH = [
+  {
+    name: 'turnstileSecret',
+    variable: 'TURNSTILE_SECRET_KEY',
+    read: () => config.turnstileSecret(),
+  },
+  {
+    name: 'unsubscribeMailto',
+    variable: 'UNSUBSCRIBE_MAILTO',
+    read: () => config.unsubscribeMailto(),
+  },
+  {
+    name: 'trackingUrlAllowlist',
+    variable: 'TRACKING_URL_ALLOWLIST',
+    read: () => config.trackingUrlAllowlist(),
+  },
 ];
 
 describe('optional-feature switches', () => {
-  it.each(PASSTHROUGH)('%s is undefined when %s is unset', (_n, read, variable) => {
+  it.each(PASSTHROUGH)('$name is undefined when $variable is unset', ({ variable, read }) => {
     withEnv({ [variable]: undefined }, () => {
       expect(read()).toBeUndefined();
     });
   });
 
-  it.each(PASSTHROUGH)('%s is undefined when %s is an empty string', (_n, read, variable) => {
+  it.each(PASSTHROUGH)('$name is undefined when $variable is an empty string', ({ variable, read }) => {
     withEnv({ [variable]: '' }, () => {
-      // An empty value must read as "feature off", never as a configured
-      // empty secret / empty allowlist.
+      // An empty value must read as "feature off", never as a configured empty
+      // secret or an empty (deny-everything) allowlist.
       expect(read()).toBeUndefined();
     });
   });
 
-  it.each(PASSTHROUGH)('%s returns the configured value of %s', (_n, read, variable) => {
+  it.each(PASSTHROUGH)('$name returns the configured value of $variable', ({ variable, read }) => {
     withEnv({ [variable]: 'configured-value' }, () => {
       expect(read()).toBe('configured-value');
     });
@@ -325,14 +391,11 @@ describe('skipMxCheck', () => {
     });
   });
 
-  it.each(['false', 'TRUE', 'True', '1', 'yes', ''])(
-    'is false for %s',
-    (raw) => {
-      withEnv({ SKIP_MX_CHECK: raw }, () => {
-        expect(config.skipMxCheck()).toBe(false);
-      });
-    },
-  );
+  it.each(['false', 'TRUE', 'True', '1', 'yes', ''])('is false for "%s"', (raw) => {
+    withEnv({ SKIP_MX_CHECK: raw }, () => {
+      expect(config.skipMxCheck()).toBe(false);
+    });
+  });
 });
 
 describe('laziness', () => {

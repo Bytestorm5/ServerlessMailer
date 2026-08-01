@@ -45,6 +45,15 @@ export function ImportPanel({ lists }: { lists: { id: string; name: string }[] }
     setEmailColumn(guess);
   }
 
+  if (lists.length === 0) {
+    return (
+      <section>
+        <h2 style={{ fontSize: '1rem' }}>Import subscribers</h2>
+        <p className="muted">Configure a list before importing subscribers.</p>
+      </section>
+    );
+  }
+
   return (
     <section>
       <h2 style={{ fontSize: '1rem' }}>Import subscribers</h2>
@@ -148,7 +157,7 @@ export function ImportPanel({ lists }: { lists: { id: string; name: string }[] }
           <button
             type="button"
             className="sm-primary"
-            disabled={busy || !csv || !emailColumn || (attested && !attestedBy)}
+            disabled={busy || !csv || !emailColumn || (attested && attestedBy.trim() === '')}
             onClick={async () => {
               setBusy(true);
               setError(null);
@@ -171,12 +180,25 @@ export function ImportPanel({ lists }: { lists: { id: string; name: string }[] }
                       : undefined,
                   }),
                 });
-                const body = await response.json();
+                // A 33,000-row CSV is posted inline, so a proxy 413/502/504
+                // returning HTML is entirely plausible. Unguarded, the reject
+                // would escape this handler and the operator would see nothing
+                // but the button flipping back — and press it again.
+                const body = (await response.json().catch(() => null)) as
+                  | (ImportOutcome & { error?: string })
+                  | null;
+                if (!body) {
+                  setError(
+                    `The server returned an unreadable response (${response.status}). ` +
+                      'The import may not have run — check the subscriber count before retrying.',
+                  );
+                  return;
+                }
                 if (!response.ok) {
                   setError(body.error ?? 'Import failed.');
                   return;
                 }
-                setResult(body as ImportOutcome);
+                setResult(body);
               } finally {
                 setBusy(false);
               }
