@@ -5,13 +5,15 @@ import { NewsletterEditor } from '@/components/editor/NewsletterEditor';
 import type { MergeFieldOption } from '@/components/editor/EditorToolbar';
 import { CampaignPreview, type PreviewSubscriber } from '@/components/campaign/CampaignPreview';
 import { SendConfirmationModal } from '@/components/campaign/SendConfirmationModal';
+import { SegmentPicker } from '@/components/campaign/SegmentPicker';
 import { useAutosave } from '@/hooks/useAutosave';
-import type { EditorDoc, PresendResult } from '@/lib/types';
+import type { EditorDoc, PresendResult, SegmentQuery } from '@/lib/types';
 
 export interface CampaignDraft {
   subject: string;
   preheader: string;
   bodySource: EditorDoc;
+  segmentQuery?: SegmentQuery;
 }
 
 export interface CampaignVersionSummary {
@@ -39,6 +41,8 @@ export interface CampaignEditorScreenProps {
   onSend: () => Promise<void>;
   onTestSend: (addresses: string[]) => Promise<void>;
   onRestoreVersion: (versionId: string) => Promise<void>;
+  /** When supplied, the segment dropdowns and their live count are shown (§4.2). */
+  onCountSegment?: (query: SegmentQuery) => Promise<number>;
 }
 
 const SAVE_LABELS: Record<string, string> = {
@@ -68,6 +72,8 @@ export function CampaignEditorScreen(props: CampaignEditorScreenProps) {
   const [confirming, setConfirming] = useState(false);
   const [testAddress, setTestAddress] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
+  const [segmentCount, setSegmentCount] = useState<number | null>(null);
+  const [segmentError, setSegmentError] = useState<string | undefined>();
 
   const { status, savedAt, error: saveError, saveNow } = useAutosave({
     value: draft,
@@ -98,6 +104,28 @@ export function CampaignEditorScreen(props: CampaignEditorScreenProps) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft, previewSubscriberId]);
+
+  // Re-count whenever the segment changes. Advisory only — the number that
+  // actually governs the send is re-derived at freeze time.
+  const countSegment = props.onCountSegment;
+  useEffect(() => {
+    if (!countSegment) return;
+    let cancelled = false;
+    setSegmentCount(null);
+    countSegment(draft.segmentQuery ?? {})
+      .then((next) => {
+        if (cancelled) return;
+        setSegmentCount(next);
+        setSegmentError(undefined);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setSegmentError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [countSegment, draft.segmentQuery]);
 
   const update = useCallback((patch: Partial<CampaignDraft>) => {
     setDraft((current) => ({ ...current, ...patch }));
@@ -154,6 +182,15 @@ export function CampaignEditorScreen(props: CampaignEditorScreenProps) {
           </button>
         </div>
       </header>
+
+      {props.onCountSegment && (
+        <SegmentPicker
+          value={draft.segmentQuery ?? {}}
+          onChange={(segmentQuery) => update({ segmentQuery })}
+          count={segmentCount}
+          error={segmentError}
+        />
+      )}
 
       <div className="sm-screen-body">
         <div className="sm-screen-write">

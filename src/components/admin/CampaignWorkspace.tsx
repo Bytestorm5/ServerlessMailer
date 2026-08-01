@@ -9,7 +9,7 @@ import {
 } from '@/components/campaign/CampaignEditorScreen';
 import type { MergeFieldOption } from '@/components/editor/EditorToolbar';
 import type { PreviewSubscriber } from '@/components/campaign/CampaignPreview';
-import type { CampaignCounts, CampaignStatus, PresendResult } from '@/lib/types';
+import type { CampaignCounts, CampaignStatus, PresendResult, SegmentQuery } from '@/lib/types';
 
 export interface FailedBatchSummary {
   id: string;
@@ -34,6 +34,8 @@ export interface CampaignWorkspaceProps {
   previewSubscribers: PreviewSubscriber[];
   versions: CampaignVersionSummary[];
   typedConfirmationThreshold: number;
+  /** Needed to count a segment; when absent the segment controls are hidden. */
+  listId?: string;
 }
 
 async function jsonOrThrow(response: Response) {
@@ -261,6 +263,20 @@ export function CampaignWorkspace(props: CampaignWorkspaceProps) {
       onRestoreVersion={async (versionId) => {
         await action({ action: 'restore', versionId });
       }}
+      onCountSegment={
+        props.listId
+          ? async (query: SegmentQuery) => {
+              const body = await jsonOrThrow(
+                await fetch('/api/admin/segment', {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({ listId: props.listId, query }),
+                }),
+              );
+              return (body as { count: number }).count;
+            }
+          : undefined
+      }
     />
   );
 }

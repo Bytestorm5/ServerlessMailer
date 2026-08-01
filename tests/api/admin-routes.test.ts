@@ -399,6 +399,35 @@ describe('GET /api/admin/subscribers/[id]', () => {
     expect(body.events).toEqual([]);
   });
 
+  it('returns an empty history for a document written before the field existed', async () => {
+    const legacy = {
+      _id: new ObjectId(),
+      listId: list._id,
+      email: 'legacy@example.com',
+      emailDomain: 'example.com',
+      status: 'confirmed',
+      attributes: {},
+      source: 'import',
+      createdAt: new Date('2024-01-01T00:00:00.000Z'),
+      confirmedAt: new Date('2024-01-01T00:00:00.000Z'),
+    };
+    await (await subscribersCollection()).insertOne(
+      legacy as unknown as Parameters<
+        Awaited<ReturnType<typeof subscribersCollection>>['insertOne']
+      >[0],
+    );
+
+    const response = await subscriberGet(
+      req(`/api/admin/subscribers/${legacy._id}`),
+      params(legacy._id.toHexString()),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.subscriber.history).toEqual([]);
+    expect(body.subscriber.email).toBe('legacy@example.com');
+  });
+
   it('lists the campaigns actually sent to this subscriber, newest first', async () => {
     const subscriber = await createSubscriber(list._id, { email: 'reader@example.com' });
     const older = await createCampaign(list._id, { subject: 'March issue' });
@@ -668,7 +697,7 @@ describe('POST /api/admin/import', () => {
   });
 
   it('rejects an empty csv', async () => {
-    for (const csv of ['', '   ', '\n\n  \n']) {
+    for (const csv of ['', '   ', '\n\n  \n', 12345, null, { data: CSV }]) {
       const response = await importPost(
         post('/api/admin/import', { listId: list._id.toHexString(), csv, mapping: MAPPING }),
         undefined,

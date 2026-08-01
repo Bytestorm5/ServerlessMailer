@@ -67,10 +67,12 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
       topLinks={topLinks
         .filter((row) => typeof row._id === 'string')
         .map((row) => ({ url: row._id, clicks: row.clicks }))}
+      listId={campaign.listId.toHexString()}
       initialDraft={{
         subject: campaign.subject,
         preheader: campaign.preheader,
         bodySource: campaign.bodySource,
+        segmentQuery: campaign.segmentQuery,
       }}
       list={{
         name: list.name,

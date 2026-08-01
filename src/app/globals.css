@@ -584,3 +584,38 @@ textarea {
   color: var(--danger);
   border-color: currentcolor;
 }
+
+/* --------------------------------------------------------------- segment */
+
+.sm-segment {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.75rem 1rem;
+}
+
+.sm-segment-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: end;
+}
+
+.sm-segment-controls p {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+}
+
+.sm-segment-controls label {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* The count is the number the operator checks before sending to 19,000
+   people, so it is stated plainly rather than tucked into a corner. */
+.sm-segment-count {
+  margin: 0.75rem 0 0;
+  font-size: 1.05rem;
+  font-weight: 500;
+}
