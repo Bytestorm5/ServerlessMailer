@@ -83,7 +83,6 @@ export const config = {
   confirmResendIntervalMs: () => numeric('CONFIRM_RESEND_INTERVAL_MS', 60 * 60 * 1000),
 
   signupRateLimitPerIpPerHour: () => numeric('SIGNUP_RATE_LIMIT_IP_PER_HOUR', 20),
-  signupRateLimitPerEmailPerHour: () => numeric('SIGNUP_RATE_LIMIT_EMAIL_PER_HOUR', 3),
 
   /** Optional Cloudflare Turnstile. When unset, the check is skipped. */
   turnstileSecret: () => process.env.TURNSTILE_SECRET_KEY || undefined,
