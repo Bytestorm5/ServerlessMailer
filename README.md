@@ -6,7 +6,9 @@ and writing — and one thing invisibly: it never double-sends, never loses a
 recipient, and never damages sender reputation.
 
 Built to [`docs/SPEC.md`](docs/SPEC.md). Module-level signatures are fixed in
-[`docs/CONTRACTS.md`](docs/CONTRACTS.md).
+[`docs/CONTRACTS.md`](docs/CONTRACTS.md). DNS and SES setup, the Squarespace
+migration order, and the failure runbook are in
+[`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 
 ## Stack
 
@@ -69,4 +71,5 @@ auto-provisioned by Vercel and is verified before any work happens.
 
 Deliverability configuration (dedicated sending subdomain, Easy DKIM, custom
 MAIL FROM, DMARC) is not application code but the application does not work
-without it. See [`docs/SPEC.md` §10](docs/SPEC.md).
+without it. See [`docs/OPERATIONS.md`](docs/OPERATIONS.md) for the exact records,
+the migration order, and what to do when something goes wrong.

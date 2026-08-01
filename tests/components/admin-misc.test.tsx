@@ -396,6 +396,75 @@ describe('CampaignWorkspace — pause and resume (§7.7)', () => {
   });
 });
 
+describe('CampaignWorkspace — the completed-campaign report', () => {
+  it('surfaces failed batches with their last error for manual review (§7.6)', async () => {
+    // Batches that hit the retry limit are people who were never emailed. If
+    // they are not on this page nobody will ever know they were missed.
+    stubFetch(editorFetch);
+    renderWorkspace('sent', {
+      counts: counts({ recipients: 100, sent: 50, failed: 50 }),
+      failedBatches: [
+        { id: 'b1', recipients: 50, attempts: 3, lastError: 'SES: MessageRejected' },
+      ],
+    });
+
+    const section = screen.getByRole('region', { name: /failed batches/i });
+    expect(section).toHaveTextContent('50');
+    expect(section).toHaveTextContent('3');
+    expect(section).toHaveTextContent('SES: MessageRejected');
+  });
+
+  it('shows no failed-batch section when nothing failed', async () => {
+    stubFetch(editorFetch);
+    renderWorkspace('sent');
+
+    expect(screen.queryByRole('region', { name: /failed batches/i })).toBeNull();
+  });
+
+  it('reports opens only when the campaign tracked them, with the Apple MPP caveat', async () => {
+    stubFetch(editorFetch);
+    renderWorkspace('sent', {
+      trackOpens: true,
+      counts: counts({ recipients: 1000, sent: 1000, opened: 412 }),
+    });
+
+    expect(screen.getByText('412')).toBeVisible();
+    // §13: an open rate must not be presented as a precise figure.
+    expect(screen.getByText(/apple mail privacy protection/i)).toBeVisible();
+  });
+
+  it('omits the tracking cards for an untracked send', async () => {
+    stubFetch(editorFetch);
+    renderWorkspace('sent', { counts: counts({ recipients: 10, sent: 10 }) });
+
+    expect(screen.queryByText(/^opened$/i)).toBeNull();
+    expect(screen.queryByText(/^clicked$/i)).toBeNull();
+    expect(screen.queryByText(/apple mail privacy protection/i)).toBeNull();
+  });
+
+  it('lists the top clicked links when click tracking was on', async () => {
+    stubFetch(editorFetch);
+    renderWorkspace('sent', {
+      trackClicks: true,
+      counts: counts({ recipients: 1000, sent: 1000, clicked: 87 }),
+      topLinks: [{ url: 'https://domain-a.com/post', clicks: 61 }],
+    });
+
+    expect(screen.getByText('https://domain-a.com/post')).toBeVisible();
+    expect(screen.getByText('61')).toBeVisible();
+  });
+
+  it('reports unsubscribes against the send', async () => {
+    stubFetch(editorFetch);
+    renderWorkspace('sent', {
+      counts: counts({ recipients: 19482, sent: 19482, unsubscribed: 41 }),
+    });
+
+    expect(screen.getByText(/^unsubscribed$/i)).toBeVisible();
+    expect(screen.getByText('41')).toBeVisible();
+  });
+});
+
 describe('CampaignWorkspace — wiring the draft editor to the admin API', () => {
   const PASSING = {
     passed: true,
@@ -501,6 +570,34 @@ describe('CampaignWorkspace — wiring the draft editor to the admin API', () =>
     const [url, init] = callsTo(fetchMock, '/actions')[0] as [string, RequestInit];
     expect(url).toBe('/api/admin/campaigns/camp-1/actions');
     expect(JSON.parse(String(init.body))).toEqual({ action: 'test', to: ['me@example.com'] });
+  });
+
+  it('counts a segment against the list the campaign belongs to', async () => {
+    // §4.2: the live count is advisory, but it must at least be counted against
+    // the right list — a count from the other domain's list would be a lie.
+    const fetchMock = stubFetch((url) => {
+      if (url.includes('/preview')) return json(200, { html: '<p>x</p>', text: 'x' });
+      if (url.includes('/segment')) return json(200, { count: 12481 });
+      return json(200, { ok: true });
+    });
+    renderWorkspace('draft', { listId: '507f1f77bcf86cd799439011' });
+
+    await waitFor(() => expect(callsTo(fetchMock, '/api/admin/segment')).not.toHaveLength(0), {
+      timeout: 5000,
+    });
+    const [, init] = callsTo(fetchMock, '/api/admin/segment')[0] as [string, RequestInit];
+    expect((init as RequestInit).method).toBe('POST');
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect(body.listId).toBe('507f1f77bcf86cd799439011');
+    expect(body.query).toBeDefined();
+  });
+
+  it('never asks for a segment count when it has no list to count against', async () => {
+    const fetchMock = stubFetch(draftFetch);
+    renderWorkspace('draft');
+
+    await waitFor(() => expect(callsTo(fetchMock, '/preview')).not.toHaveLength(0));
+    expect(callsTo(fetchMock, '/api/admin/segment')).toHaveLength(0);
   });
 
   it('restores a previous version through the actions endpoint', async () => {

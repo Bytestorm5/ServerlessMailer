@@ -96,7 +96,7 @@ describe('withAdmin — the session is checked before anything else', () => {
   it('passes the request and context through untouched and returns the handler response verbatim', async () => {
     const ctx = { params: Promise.resolve({ id: 'abc' }) };
     const request = authed();
-    const handler = vi.fn(async () =>
+    const handler = vi.fn(async (_request: Request, _ctx: typeof ctx) =>
       new Response(JSON.stringify({ ok: true, mine: true }), {
         status: 201,
         headers: { 'content-type': 'application/json', 'x-custom': 'kept' },
