@@ -219,7 +219,8 @@ describe('each check fails independently', () => {
   it('fails when the SES identity check itself errors', async () => {
     // An unreachable SES is not permission to send.
     setSesAdapter({
-      ...ses,
+      sendBulk: (params) => ses.sendBulk(params),
+      sendSimple: (params) => ses.sendSimple(params),
       isIdentityVerified: async () => {
         throw new Error('SES unreachable');
       },

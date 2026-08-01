@@ -16,11 +16,14 @@ export type AdminHandler<C = unknown> = (
 
 export function withAdmin<C>(handler: AdminHandler<C>): AdminHandler<C> {
   return async (request, ctx) => {
-    const session = await requireAdmin(request);
-    if (!session) {
-      return Response.json({ ok: false, error: 'unauthorized' }, { status: 401 });
-    }
     try {
+      // Inside the try on purpose: if session verification itself throws — a
+      // missing secret, a malformed cookie header — the safe answer is a 401,
+      // not an unhandled rejection that Next turns into an opaque crash.
+      const session = await requireAdmin(request);
+      if (!session) {
+        return Response.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+      }
       return await handler(request, ctx);
     } catch (err) {
       logger.error('admin route failed', {
