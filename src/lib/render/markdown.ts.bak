@@ -133,7 +133,7 @@ function escapeBlockStart(line: string): string {
 
 /** Angle-bracket form when the destination contains anything ambiguous. */
 function serializeDestination(href: string): string {
-  if (/[\s()<>]/.test(href)) return href;
+  if (/[\s()<>]/.test(href)) return `<${href.replace(/[<>]/g, (character) => `\\${character}`)}>`;
   return href;
 }
 

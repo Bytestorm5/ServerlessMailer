@@ -409,13 +409,16 @@ function describeError(error: MjmlError): string {
 }
 
 /**
- * Runs MJML. Never throws: a source MJML cannot parse at all is reported the
- * same way a validation problem is, so callers have exactly one error path.
+ * Runs MJML. Never throws: a source MJML cannot parse, and a failure to load
+ * MJML itself, are both reported the same way a validation problem is, so
+ * callers have exactly one error path to handle.
+ *
+ * mjml v5 is async — `(await import('mjml')).default(src)` resolves to
+ * `{ html, json, errors }`.
  */
 export async function renderMjml(mjml: string): Promise<{ html: string; errors: string[] }> {
-  const mjml2html = (await import('mjml')).default;
-
   try {
+    const mjml2html = (await import('mjml')).default;
     const result = await mjml2html(mjml, { validationLevel: 'soft' });
     const errors: MjmlError[] = Array.isArray(result?.errors) ? result.errors : [];
     return {

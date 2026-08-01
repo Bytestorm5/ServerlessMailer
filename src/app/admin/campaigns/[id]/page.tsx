@@ -1,0 +1,71 @@
+import { notFound } from 'next/navigation';
+import { ObjectId } from 'mongodb';
+import { campaignsCollection, listsCollection, subscribersCollection } from '@/lib/db/collections';
+import { listCampaignVersions } from '@/lib/campaigns';
+import { config } from '@/lib/config';
+import { AVAILABLE_MERGE_FIELDS } from '@/lib/merge';
+import { CampaignWorkspace } from '@/components/admin/CampaignWorkspace';
+
+export const dynamic = 'force-dynamic';
+
+export default async function CampaignPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  if (!ObjectId.isValid(id)) notFound();
+
+  const campaign = await (await campaignsCollection()).findOne({ _id: new ObjectId(id) });
+  if (!campaign) notFound();
+  const list = await (await listsCollection()).findOne({ _id: campaign.listId });
+  if (!list) notFound();
+
+  // A handful of real subscribers, so preview merge data is real data and
+  // fallbacks actually get exercised (spec section 6.3).
+  const previewSubscribers = await (await subscribersCollection())
+    .find({ listId: campaign.listId, status: 'confirmed' })
+    .limit(10)
+    .toArray();
+
+  const versions = await listCampaignVersions(campaign._id, 20);
+
+  return (
+    <CampaignWorkspace
+      campaignId={campaign._id.toHexString()}
+      status={campaign.status}
+      pausedReason={campaign.pausedReason ?? null}
+      counts={campaign.counts}
+      initialDraft={{
+        subject: campaign.subject,
+        preheader: campaign.preheader,
+        bodySource: campaign.bodySource,
+      }}
+      list={{
+        name: list.name,
+        fromName: list.fromName,
+        fromEmail: list.fromEmail,
+        replyTo: list.replyTo,
+      }}
+      mergeFields={AVAILABLE_MERGE_FIELDS.map((field) => ({
+        key: field.key,
+        label: field.label,
+        description: field.description,
+        system: field.system,
+      }))}
+      previewSubscribers={previewSubscribers.map((subscriber) => ({
+        id: subscriber._id.toHexString(),
+        email: subscriber.email,
+        label: `${subscriber.email}${
+          Object.keys(subscriber.attributes ?? {}).length
+            ? ` — ${Object.entries(subscriber.attributes)
+                .map(([key, value]) => `${key}: ${value}`)
+                .join(', ')}`
+            : ' — no attributes'
+        }`,
+      }))}
+      versions={versions.map((version) => ({
+        id: version._id.toHexString(),
+        createdAt: version.createdAt.toISOString(),
+        subject: version.subject,
+      }))}
+      typedConfirmationThreshold={config.typedConfirmationThreshold()}
+    />
+  );
+}

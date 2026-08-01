@@ -258,6 +258,15 @@ describe('validateEditorDoc — link hrefs are an XSS surface', () => {
     'data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==',
     'vbscript:msgbox(1)',
     'file:///etc/passwd',
+    // Schemes that DO parse to a non-empty host, so only a protocol check
+    // catches them. The `//` makes the host a JavaScript comment target and
+    // `%0a` starts the payload on a fresh line — a live webmail XSS.
+    'javascript://example.com/%0aalert(1)',
+    'JAVASCRIPT://example.com/%0aalert(1)',
+    'javascript://%0aalert(document.cookie)//example.com',
+    'data://example.com/payload',
+    'vbscript://evil.test/x',
+    'ftp://example.com/file.txt',
     'mailto:someone@example.com',
     'tel:+441234567890',
     '/relative/path',
@@ -305,7 +314,14 @@ describe('validateEditorDoc — images', () => {
   });
 
   it('rejects a non-http(s) image src', () => {
-    for (const src of ['javascript:alert(1)', 'data:image/gif;base64,R0lGOD', '/local.png']) {
+    for (const src of [
+      'javascript:alert(1)',
+      'data:image/gif;base64,R0lGOD',
+      '/local.png',
+      // Parses with a real host; only the protocol check rejects it.
+      'javascript://example.com/%0aalert(1)',
+      'ftp://example.com/logo.png',
+    ]) {
       expect(errorsOf(doc(bad({ type: 'image', attrs: { src } }))).join(' ')).toMatch(/src/);
     }
   });

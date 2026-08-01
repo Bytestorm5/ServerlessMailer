@@ -600,6 +600,43 @@ describe('docToMjml — legally required chrome', () => {
   it('omits the open pixel unless one is supplied', () => {
     expect(docToMjml(makeDoc(para(text('Hi'))), chromeWith())).not.toContain('<img');
   });
+
+  it('omits the open pixel when its URL uses a dangerous scheme', () => {
+    const src = docToMjml(
+      makeDoc(para(text('Hi'))),
+      chromeWith({ openPixelUrl: 'javascript:alert(1)' }),
+    );
+
+    expect(src).not.toContain('<img');
+    expect(src.toLowerCase()).not.toContain('javascript:');
+  });
+
+  it('splits a multi-line postal address onto separate lines', () => {
+    const src = docToMjml(
+      makeDoc(para(text('Hi'))),
+      chromeWith({ physicalAddress: 'Acme Ltd\n\n1 Example Street\nLondon' }),
+    );
+
+    expect(src).toContain('Acme Ltd<br />1 Example Street<br />London');
+  });
+
+  it('still renders the unsubscribe link when the chrome fields are the wrong type', () => {
+    // Fail closed: a malformed list document must not silently produce an
+    // email that is illegal to send.
+    const src = docToMjml(
+      makeDoc(para(text('Hi'))),
+      {
+        preheader: 12 as unknown as string,
+        physicalAddress: null as unknown as string,
+        listName: undefined as unknown as string,
+        unsubscribePlaceholder: '{{unsubscribe_url}}',
+      },
+    );
+
+    expect(src).toContain('href="{{unsubscribe_url}}"');
+    expect(src).not.toContain('<mj-preview>');
+    expect(src).not.toContain('<mj-title>');
+  });
 });
 
 describe('docToMjml — merge placeholders', () => {
@@ -658,6 +695,79 @@ describe('renderMjml', () => {
 
     expect(result.errors.length).toBeGreaterThan(0);
     expect(result.html).toBe('');
+  });
+
+  it('reports a failure to load MJML itself rather than throwing', async () => {
+    vi.resetModules();
+    vi.doMock('mjml', () => {
+      throw new Error('Cannot find module mjml');
+    });
+
+    try {
+      const mod = await import('@/lib/render/html');
+      // The contract is "resolves with an error", not "rejects" — callers have
+      // exactly one error path, and a failed import must not become an
+      // unhandled rejection inside the freeze step.
+      const result = await mod.renderMjml('<mjml><mj-body /></mjml>');
+
+      expect(result.html).toBe('');
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].length).toBeGreaterThan(0);
+    } finally {
+      vi.doUnmock('mjml');
+      vi.resetModules();
+    }
+  });
+
+  it('describes errors that carry no line or tag, and normalises a malformed result', async () => {
+    vi.resetModules();
+    vi.doMock('mjml', () => ({
+      default: async () => ({
+        // No `html` string and no `errors` array — a shape mjml should never
+        // produce, but one that must not crash the freeze step if it does.
+        errors: undefined,
+      }),
+    }));
+
+    try {
+      const mod = await import('@/lib/render/html');
+      const result = await mod.renderMjml('<mjml><mj-body /></mjml>');
+
+      expect(result.html).toBe('');
+      expect(result.errors).toEqual([]);
+    } finally {
+      vi.doUnmock('mjml');
+      vi.resetModules();
+    }
+  });
+
+  it('falls back through message, formattedMessage and a generic description', async () => {
+    vi.resetModules();
+    vi.doMock('mjml', () => ({
+      default: async () => ({
+        html: '<html></html>',
+        json: {},
+        errors: [
+          { message: 'plain message with no location' },
+          { formattedMessage: 'only formatted', line: 4 },
+          {},
+        ],
+      }),
+    }));
+
+    try {
+      const mod = await import('@/lib/render/html');
+      const result = await mod.renderMjml('<mjml><mj-body /></mjml>');
+
+      expect(result.errors).toEqual([
+        'plain message with no location',
+        'line 4: only formatted',
+        'unknown MJML error',
+      ]);
+    } finally {
+      vi.doUnmock('mjml');
+      vi.resetModules();
+    }
   });
 });
 

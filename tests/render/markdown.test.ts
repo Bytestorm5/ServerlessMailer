@@ -121,6 +121,7 @@ describe('markdown round-trip', () => {
     ['the campaign fixture', validCampaignDoc()],
     ['a heading', doc(h(3, 'Just a heading'))],
     ['a hard break', doc(p(t('a'), br, t('b')))],
+    ['a hard break after a literal backslash', doc(p(t('path\\'), br, t('next')))],
     ['a nested bullet list', doc(ul(item('a'), li(p(t('b')), ul(item('c')))))],
     ['an ordered list starting at 5', doc(ol(5, item('five'), item('six')))],
     ['a nested blockquote', doc(quote(p(t('outer')), quote(p(t('inner')))))],
@@ -314,6 +315,12 @@ describe('markdownToDoc', () => {
     expect(markdownToDoc('one\\\ntwo')).toEqual(doc(p(t('one'), br, t('two'))));
   });
 
+  it('treats an escaped backslash at the end of a line as text, not a hard break', () => {
+    // `a\\` is a literal backslash: only an *odd* run ends in an unescaped one.
+    expect(markdownToDoc('a\\\\\nb')).toEqual(doc(p(t('a\\ b'))));
+    expect(markdownToDoc('a\\\\\\\nb')).toEqual(doc(p(t('a\\'), br, t('b'))));
+  });
+
   it('joins soft-wrapped lines with a space', () => {
     expect(markdownToDoc('one\ntwo')).toEqual(doc(p(t('one two'))));
   });
@@ -418,6 +425,9 @@ describe('markdownToDoc — untrusted input', () => {
     'vbscript:msgbox(1)',
     '/relative',
     'mailto:someone@example.com',
+    // Parses to a real host, so only a protocol check catches it.
+    'javascript://example.com/%0aalert(1)',
+    'ftp://example.com/file.txt',
   ])('drops the unsafe link destination %j', (href) => {
     const parsed = markdownToDoc(`[label](${href})`);
     expect(collectLinks(parsed)).toEqual([]);
