@@ -208,15 +208,25 @@ describe('importSubscribers — idempotency', () => {
 
 describe('importSubscribers — malformed rows are reported, not dropped', () => {
   it('reports each invalid address with its row number', async () => {
+    // Two columns so an empty email cell is unambiguous rather than a blank line.
     const result = await run(
-      'email\ngood@example.com\nnot-an-email\n\nalso bad@\nfine@example.com\n',
+      [
+        'email,first_name',
+        'good@example.com,Ada',
+        'not-an-email,Bob',
+        ',Carol',
+        'also bad@,Dan',
+        'fine@example.com,Eve',
+      ].join('\n'),
     );
 
     expect(result.imported).toBe(2);
     expect(result.errors).toHaveLength(3);
-    // Row numbers are 1-based and account for the header row.
+    // Row numbers are 1-based and account for the header row, so the operator
+    // can find the offending line in their spreadsheet.
     expect(result.errors.map((e) => e.row).sort((a, b) => a - b)).toEqual([3, 4, 5]);
-    expect(result.errors[0].reason).toMatch(/valid email/i);
+    expect(result.errors.some((e) => /valid email/i.test(e.reason))).toBe(true);
+    expect(result.errors.some((e) => /no email/i.test(e.reason))).toBe(true);
   });
 
   it('reports duplicates within the same file', async () => {

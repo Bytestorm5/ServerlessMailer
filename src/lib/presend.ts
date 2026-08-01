@@ -2,7 +2,7 @@ import type { ObjectId } from 'mongodb';
 import { campaignsCollection, listsCollection } from '@/lib/db/collections';
 import { findMergeFieldsWithoutFallback, findUnknownMergeFields } from '@/lib/merge';
 import { collectLinks, isEmptyDoc, isImageOnly, validateEditorDoc } from '@/lib/render/doc';
-import { mergeFieldsUsed, renderCampaignForSend } from '@/lib/render/campaign';
+import { campaignTemplateText, renderCampaignForSend } from '@/lib/render/campaign';
 import { countSegment } from '@/lib/segments';
 import { getSesAdapter } from '@/lib/ses/registry';
 import type { PresendCheck, PresendResult } from '@/lib/types';
@@ -70,9 +70,8 @@ export async function validateCampaignForSend(
 
   // Merge fields: every non-system field must carry a fallback, or a recipient
   // with a missing attribute receives "Hi ,".
-  const withoutFallback = findMergeFieldsWithoutFallback(
-    mergeFieldsUsed(campaign).map((ref) => ref.raw).join('\n'),
-  );
+  const template = campaignTemplateText(campaign);
+  const withoutFallback = findMergeFieldsWithoutFallback(template);
   add(
     'merge_fallbacks',
     'All merge fields have fallbacks',
@@ -82,9 +81,7 @@ export async function validateCampaignForSend(
       : undefined,
   );
 
-  const unknown = findUnknownMergeFields(
-    mergeFieldsUsed(campaign).map((ref) => ref.raw).join('\n'),
-  );
+  const unknown = findUnknownMergeFields(template);
   add(
     'merge_fields_known',
     'All merge fields are recognised',

@@ -365,6 +365,15 @@ describe('serializeCsv — spreadsheet formula injection (CONTRACTS §24)', () =
   it('leaves empty and undefined fields unprefixed', () => {
     expect(serializeCsv(['a', 'b'], [['', undefined]])).toBe('a,b\r\n,\r\n');
   });
+
+  it('coerces a non-string cell rather than emitting "undefined" or throwing', () => {
+    // Defensive: an export builder that forgets to stringify a count or a null
+    // attribute must not corrupt the file.
+    const rows = [[0, null, -7, true]] as unknown as (string | undefined)[][];
+    expect(serializeCsv(['n', 'z', 'neg', 'flag'], rows)).toBe(
+      'n,z,neg,flag\r\n0,,\'-7,true\r\n',
+    );
+  });
 });
 
 describe('round trip', () => {

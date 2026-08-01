@@ -54,6 +54,10 @@ function mapTextNodes(doc: EditorDoc, fn: (text: string) => string): EditorDoc {
 }
 
 /** Every text fragment that may contain a merge field, including the subject. */
+export function campaignTemplateText(campaign: CampaignDoc): string {
+  return templateText(campaign);
+}
+
 function templateText(campaign: CampaignDoc): string {
   const parts: string[] = [campaign.subject, campaign.preheader];
   const walk = (nodes: EditorNode[] = []) => {
