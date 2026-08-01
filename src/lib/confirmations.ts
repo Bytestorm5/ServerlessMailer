@@ -4,6 +4,7 @@ import { buildConfirmationEmail } from '@/lib/email/confirmation';
 import { logger } from '@/lib/logging';
 import { getSesAdapter } from '@/lib/ses/registry';
 import { setConfirmToken } from '@/lib/subscribers';
+import { filterSuppressed } from '@/lib/suppressions';
 import type { ListDoc } from '@/lib/types';
 
 /**
@@ -37,6 +38,10 @@ export async function sendPendingConfirmations(
 
   if (pending.length === 0) return result;
 
+  // The suppression list is sacred: every send path checks it, no exceptions
+  // (§1.2). An address can be suppressed between the import and this run.
+  const suppressed = await filterSuppressed(pending.map((s) => s.email));
+
   const listIds = new Map(pending.map((s) => [s.listId.toHexString(), s.listId]));
   const lists = new Map<string, ListDoc>(
     (await (await listsCollection()).find({ _id: { $in: [...listIds.values()] } }).toArray()).map(
@@ -47,6 +52,16 @@ export async function sendPendingConfirmations(
   const ses = await getSesAdapter();
 
   for (const subscriber of pending) {
+    if (suppressed.has(subscriber.email)) {
+      // Mark it handled so this address is not reconsidered every minute. The
+      // record stays `pending` and is purged after seven days like any other.
+      await subscribers.updateOne(
+        { _id: subscriber._id },
+        { $set: { confirmEmailSentAt: now } },
+      );
+      continue;
+    }
+
     const list = lists.get(subscriber.listId.toHexString());
     if (!list) {
       // An import against a list that has since been removed. Nothing to send,

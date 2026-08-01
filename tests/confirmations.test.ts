@@ -183,3 +183,22 @@ describe('an import without an attestation still reaches its subscribers', () =>
     expect(ses.simpleSends).toHaveLength(0);
   });
 });
+
+describe('the suppression list is checked here too', () => {
+  it('never emails a suppressed address, and stops reconsidering it', async () => {
+    // §1.2: every send path checks the suppression list. No exceptions.
+    const { addSuppression } = await import('@/lib/suppressions');
+    await createSubscriber(list._id, { email: 'blocked@example.com', status: 'pending' });
+    await createSubscriber(list._id, { email: 'fine@example.com', status: 'pending' });
+    await addSuppression({ email: 'blocked@example.com', reason: 'hard_bounce' });
+
+    const result = await sendPendingConfirmations();
+
+    expect(result.sent).toBe(1);
+    expect(ses.simpleSends.map((s) => s.to)).toEqual(['fine@example.com']);
+
+    // Not retried on the next tick.
+    expect((await sendPendingConfirmations()).sent).toBe(0);
+    expect((await reload('blocked@example.com'))?.status).toBe('pending');
+  });
+});

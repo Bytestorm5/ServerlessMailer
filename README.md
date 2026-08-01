@@ -8,7 +8,9 @@ recipient, and never damages sender reputation.
 Built to [`docs/SPEC.md`](docs/SPEC.md). Module-level signatures are fixed in
 [`docs/CONTRACTS.md`](docs/CONTRACTS.md). DNS and SES setup, the Squarespace
 migration order, and the failure runbook are in
-[`docs/OPERATIONS.md`](docs/OPERATIONS.md).
+[`docs/OPERATIONS.md`](docs/OPERATIONS.md); the decisions taken along the way,
+including answers to the spec's open questions, are in
+[`docs/DECISIONS.md`](docs/DECISIONS.md).
 
 ## Stack
 
