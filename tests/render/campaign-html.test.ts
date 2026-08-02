@@ -117,7 +117,7 @@ describe('pasted HTML body', () => {
     const campaign = await htmlCampaign();
     const rendered = await renderCampaignForSend(campaign, list, null);
 
-    expect(rendered.html).toContain('<!DOCTYPE html>');
+    expect(rendered.html.toLowerCase()).toContain('<!doctype html>');
     expect(rendered.html).toContain('Weekly update');
     expect(rendered.html).toContain(list.name);
   });

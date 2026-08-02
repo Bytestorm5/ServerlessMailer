@@ -400,6 +400,7 @@ describe('validate and preview', () => {
     const { saveTemplate } = await import('@/lib/templates');
     await saveTemplate(
       list._id,
+      'campaign',
       '<html><body><div class="shell">{{content}}</div>' +
         '<p>{{physical_address}}</p><a href="{{unsubscribe_url}}">Out</a></body></html>',
     );

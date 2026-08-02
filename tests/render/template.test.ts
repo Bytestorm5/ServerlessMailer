@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_CONFIRMATION_TEMPLATE_HTML,
   DEFAULT_TEMPLATE_HTML,
   MAX_TEMPLATE_LENGTH,
   TEMPLATE_PLACEHOLDERS,
@@ -7,6 +8,8 @@ import {
   applyTemplate,
   hasContentSlot,
   renderEmailDocument,
+  defaultTemplateHtml,
+  isTemplateKind,
   stripTemplateOnlyPlaceholders,
   validateTemplateHtml,
 } from '@/lib/render/template';
@@ -85,9 +88,9 @@ describe('validateTemplateHtml', () => {
 
 describe('stripTemplateOnlyPlaceholders / hasContentSlot', () => {
   it('removes only the template-only placeholders', () => {
-    expect(stripTemplateOnlyPlaceholders('a{{content}}b{{ preheader }}c{{list_name}}')).toBe(
-      'a b c{{list_name}}',
-    );
+    expect(
+      stripTemplateOnlyPlaceholders('a{{content}}b{{ preheader }}c{{confirm_url}}d{{list_name}}'),
+    ).toBe('a b c d{{list_name}}');
   });
 
   it('detects the content slot', () => {
@@ -287,7 +290,7 @@ describe('the default template', () => {
       chrome: CHROME,
     });
 
-    expect(html).toContain('<!DOCTYPE html>');
+    expect(html.toLowerCase()).toContain('<!doctype html>');
     expect(html).toContain('Domain A Weekly');
     expect(html).toContain('A heading');
     expect(html).toContain('{{unsubscribe_url}}');
@@ -303,16 +306,184 @@ describe('the default template', () => {
       chrome: CHROME,
     });
 
-    expect(html).toMatch(/<p style="[^"]*font-family: ?Arial/i);
+    expect(html).toMatch(/<p style="[^"]*font-family:[^"]*Segoe UI/i);
     expect(html).toMatch(/<h2 style="[^"]*Georgia/i);
   });
 
   it('documents every placeholder it uses', () => {
-    const documented = new Set(TEMPLATE_PLACEHOLDERS.map((placeholder) => placeholder.key));
+    const documented = new Set(
+      TEMPLATE_PLACEHOLDERS.campaign.map((placeholder) => placeholder.key),
+    );
     const used = new Set(
       [...DEFAULT_TEMPLATE_HTML.matchAll(/\{\{\s*([a-z_]+)\s*\}\}/g)].map((match) => match[1]),
     );
 
     for (const key of used) expect(documented).toContain(key);
+  });
+});
+
+describe('validateTemplateHtml — confirmation templates', () => {
+  const CONFIRMATION = '<html><body><a href="{{confirm_url}}">Confirm</a></body></html>';
+
+  it('accepts the default confirmation template', () => {
+    expect(validateTemplateHtml(DEFAULT_CONFIRMATION_TEMPLATE_HTML, 'confirmation')).toMatchObject(
+      { ok: true, errors: [] },
+    );
+  });
+
+  it('requires the link the email exists to get clicked', () => {
+    const result = validateTemplateHtml('<html><body><p>Hello.</p></body></html>', 'confirmation');
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(' ')).toContain('{{confirm_url}}');
+  });
+
+  it('does not require a content slot: this is the whole email', () => {
+    expect(validateTemplateHtml(CONFIRMATION, 'confirmation').ok).toBe(true);
+  });
+
+  it('refuses an unsubscribe link, because there is nothing to unsubscribe from', () => {
+    const result = validateTemplateHtml(
+      `${CONFIRMATION.replace('</body>', '<a href="{{unsubscribe_url}}">Out</a></body>')}`,
+      'confirmation',
+    );
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(' ')).toContain('nothing to unsubscribe from');
+  });
+
+  it('refuses {{confirm_url}} in a campaign template', () => {
+    const result = validateTemplateHtml(
+      '<html><body>{{content}}<a href="{{confirm_url}}">x</a></body></html>',
+      'campaign',
+    );
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(' ')).toContain('confirmation template');
+  });
+
+  it('still demands fallbacks on subscriber attributes', () => {
+    const greeting = CONFIRMATION.replace('<a', '<p>Hi {{first_name}}</p><a');
+    expect(validateTemplateHtml(greeting, 'confirmation').ok).toBe(false);
+  });
+});
+
+describe('renderEmailDocument — confirmation kind', () => {
+  const CONFIRM_CHROME = {
+    ...CHROME,
+    unsubscribePlaceholder: '',
+    confirmUrl: 'https://mail.example.com/api/confirm?token=abc&x=1',
+  };
+
+  it('resolves the confirmation link and escapes it into the href', async () => {
+    const html = await renderEmailDocument(
+      '<html><body><a href="{{confirm_url}}">Go</a></body></html>',
+      CONFIRM_CHROME,
+      'confirmation',
+    );
+
+    expect(html).toContain('https://mail.example.com/api/confirm?token=abc&amp;x=1');
+  });
+
+  it('appends the link when the template forgot it, rather than sending a dead email', async () => {
+    const html = await renderEmailDocument(
+      '<html><body><p>Hello.</p></body></html>',
+      CONFIRM_CHROME,
+      'confirmation',
+    );
+
+    expect(html).toContain('Confirm your subscription');
+    expect(html).toContain('token=abc');
+  });
+
+  it('adds no unsubscribe link', async () => {
+    const html = await renderEmailDocument(
+      '<html><body><a href="{{confirm_url}}">Go</a></body></html>',
+      CONFIRM_CHROME,
+      'confirmation',
+    );
+
+    expect(html).not.toMatch(/unsubscribe/i);
+  });
+
+  it('still guarantees the postal address', async () => {
+    const html = await renderEmailDocument(
+      '<html><body><a href="{{confirm_url}}">Go</a></body></html>',
+      CONFIRM_CHROME,
+      'confirmation',
+    );
+
+    expect(html).toContain('1 Example Street');
+  });
+
+  it('fails closed when the caller supplied no confirmation URL at all', async () => {
+    await expect(
+      renderEmailDocument(
+        '<html><body><a href="{{confirm_url}}">Go</a></body></html>',
+        { ...CONFIRM_CHROME, confirmUrl: undefined },
+        'confirmation',
+      ),
+    ).rejects.toBeInstanceOf(TemplateRenderError);
+  });
+});
+
+describe('the default templates share one design', () => {
+  it('picks the right default per kind', () => {
+    expect(defaultTemplateHtml('campaign')).toBe(DEFAULT_TEMPLATE_HTML);
+    expect(defaultTemplateHtml('confirmation')).toBe(DEFAULT_CONFIRMATION_TEMPLATE_HTML);
+    expect(isTemplateKind('confirmation')).toBe(true);
+    expect(isTemplateKind('receipt')).toBe(false);
+  });
+
+  it.each([
+    ['campaign', DEFAULT_TEMPLATE_HTML],
+    ['confirmation', DEFAULT_CONFIRMATION_TEMPLATE_HTML],
+  ])('%s: uses the shared palette and card', (_kind, template) => {
+    expect(template).toContain('#F9F3ED'); // cream page
+    expect(template).toContain('#FFFBF7'); // paper card
+    expect(template).toContain('border-radius:14px');
+    expect(template).toContain('x-apple-disable-message-reformatting');
+  });
+
+  it.each([
+    ['campaign', DEFAULT_TEMPLATE_HTML],
+    ['confirmation', DEFAULT_CONFIRMATION_TEMPLATE_HTML],
+  ])('%s: holds its width with an MSO-only table', (_kind, template) => {
+    // Word ignores max-width, so a fixed 600 would still be 600 on a phone.
+    expect(template).toContain('<!--[if mso]>');
+    expect(template).toContain('width="600"');
+    expect(template).toContain('max-width:600px');
+  });
+
+  it('survives sanitizing and inlining with its Outlook scaffolding intact', async () => {
+    const html = await renderEmailDocument(
+      DEFAULT_CONFIRMATION_TEMPLATE_HTML,
+      {
+        preheader: '',
+        physicalAddress: '1 Example Street',
+        listName: 'Domain A Weekly',
+        unsubscribePlaceholder: '',
+        confirmUrl: 'https://mail.example.com/api/confirm?token=abc',
+      },
+      'confirmation',
+    );
+
+    // The VML button and the downlevel-revealed anchor are the whole reason a
+    // bulletproof button works; an inliner that ate either would be silent.
+    expect(html).toContain('v:roundrect');
+    expect(html).toContain('<!--[if !mso]><!-- -->');
+    expect(html).toContain('<!--<![endif]-->');
+    expect(html).toContain('CONFIRM SUBSCRIPTION');
+    expect(html).toContain('https://mail.example.com/api/confirm?token=abc');
+  });
+
+  it('renders the campaign default with its type scale inlined', async () => {
+    const html = await applyTemplate({
+      templateHtml: DEFAULT_TEMPLATE_HTML,
+      contentHtml: '<h2>A heading</h2><p>Body copy.</p>',
+      chrome: CHROME,
+    });
+
+    expect(html).toMatch(/<h2 style="[^"]*Georgia/i);
+    expect(html).toMatch(/<p style="[^"]*font-size: ?16px/i);
+    expect(html).toContain('{{unsubscribe_url}}');
+    expect(html).toContain('1 Example Street');
   });
 });

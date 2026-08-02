@@ -7,7 +7,10 @@ import {
   suppressionsCollection,
 } from '@/lib/db/collections';
 import { ensureIndexes } from '@/lib/db/indexes';
-import { DEFAULT_TEMPLATE_HTML } from '@/lib/render/template';
+import {
+  DEFAULT_CONFIRMATION_TEMPLATE_HTML,
+  DEFAULT_TEMPLATE_HTML,
+} from '@/lib/render/template';
 import type {
   CampaignDoc,
   EditorDoc,
@@ -16,6 +19,7 @@ import type {
   SubscriberDoc,
   SubscriberStatus,
   SuppressionDoc,
+  TemplateKind,
 } from '@/lib/types';
 
 export const emptyCounts = () => ({
@@ -73,12 +77,16 @@ export function validCampaignHtml(): string {
 
 export async function createTemplate(
   listId: ObjectId,
-  html: string = DEFAULT_TEMPLATE_HTML,
+  kind: TemplateKind = 'campaign',
+  html: string = kind === 'confirmation'
+    ? DEFAULT_CONFIRMATION_TEMPLATE_HTML
+    : DEFAULT_TEMPLATE_HTML,
 ): Promise<EmailTemplateDoc> {
   await ensureIndexes();
   const doc: EmailTemplateDoc = {
     _id: new ObjectId(),
     listId,
+    kind,
     html,
     createdAt: new Date(),
     updatedAt: new Date(),

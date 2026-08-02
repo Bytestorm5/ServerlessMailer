@@ -3,21 +3,23 @@ import { emailTemplatesCollection, listsCollection } from '@/lib/db/collections'
 import { logger } from '@/lib/logging';
 import { docToContentHtml } from '@/lib/render/html';
 import {
-  DEFAULT_TEMPLATE_HTML,
   applyTemplate,
+  defaultTemplateHtml,
+  renderEmailDocument,
   validateTemplateHtml,
   type TemplateValidation,
 } from '@/lib/render/template';
-import type { EditorDoc, EmailTemplateDoc } from '@/lib/types';
+import { TEMPLATE_KINDS, type EditorDoc, type EmailTemplateDoc, type TemplateKind } from '@/lib/types';
 
 /**
  * Template storage (spec §6.2a).
  *
- * One template per list, because a list *is* a newsletter: the sending domain,
- * the From pair and the postal address already live there, and the branding
- * belongs with them. A list with no template document renders through the
- * built-in MJML layout, which is what every list starts with — storing a
- * template is the opt-in, and deleting it is the way back.
+ * One template per list per kind, because a list *is* a newsletter: the sending
+ * domain, the From pair and the postal address already live there, and the
+ * branding belongs with them. A list with no template document for a kind
+ * renders that email through the built-in layout, which is what every list
+ * starts with — storing a template is the opt-in, and deleting it is the way
+ * back.
  *
  * Validation is not advisory. A template is stored only if it is valid, so the
  * only way to reach the renderer with a broken one is to edit the database by
@@ -32,47 +34,55 @@ export interface SaveTemplateResult {
   template?: EmailTemplateDoc;
 }
 
-export async function getTemplate(listId: ObjectId): Promise<EmailTemplateDoc | null> {
-  return (await emailTemplatesCollection()).findOne({ listId });
+export async function getTemplate(
+  listId: ObjectId,
+  kind: TemplateKind = 'campaign',
+): Promise<EmailTemplateDoc | null> {
+  return (await emailTemplatesCollection()).findOne({ listId, kind });
 }
 
 /**
- * The template HTML a campaign on this list should render through, or `null`
- * for the built-in layout.
+ * The template HTML an email of this kind should render through, or `null` for
+ * the built-in layout.
  *
  * Every render path calls this rather than reading the collection directly, so
- * "no template means MJML" is decided in exactly one place.
+ * "no template means the built-in layout" is decided in exactly one place.
  */
-export async function getTemplateHtml(listId: ObjectId): Promise<string | null> {
-  const template = await getTemplate(listId);
+export async function getTemplateHtml(
+  listId: ObjectId,
+  kind: TemplateKind = 'campaign',
+): Promise<string | null> {
+  const template = await getTemplate(listId, kind);
   return template?.html ?? null;
 }
 
 export async function saveTemplate(
   listId: ObjectId,
+  kind: TemplateKind,
   html: unknown,
   now: Date = new Date(),
 ): Promise<SaveTemplateResult> {
   const list = await (await listsCollection()).findOne({ _id: listId });
   if (!list) return { ok: false, errors: ['no such list'], removed: [] };
 
-  const validation: TemplateValidation = validateTemplateHtml(html);
+  const validation: TemplateValidation = validateTemplateHtml(html, kind);
   if (!validation.ok) {
     return { ok: false, errors: validation.errors, removed: validation.removed };
   }
 
   const templates = await emailTemplatesCollection();
   const updated = await templates.findOneAndUpdate(
-    { listId },
+    { listId, kind },
     {
       $set: { html: html as string, updatedAt: now },
-      $setOnInsert: { _id: new ObjectId(), listId, createdAt: now },
+      $setOnInsert: { _id: new ObjectId(), listId, kind, createdAt: now },
     },
     { upsert: true, returnDocument: 'after' },
   );
 
   logger.info('email template saved', {
     listId: listId.toHexString(),
+    kind,
     bytes: (html as string).length,
     removed: validation.removed.length,
   });
@@ -86,16 +96,19 @@ export async function saveTemplate(
 }
 
 /**
- * Drops the custom template, returning the list to the built-in layout.
+ * Drops the custom template, returning that email to the built-in layout.
  *
  * Reversible and non-destructive to anything already sent: a frozen campaign
  * carries its own copy of the template it rendered through (§7.1), so removing
  * one here cannot change an email that is already on its way.
  */
-export async function deleteTemplate(listId: ObjectId): Promise<boolean> {
-  const result = await (await emailTemplatesCollection()).deleteOne({ listId });
+export async function deleteTemplate(
+  listId: ObjectId,
+  kind: TemplateKind = 'campaign',
+): Promise<boolean> {
+  const result = await (await emailTemplatesCollection()).deleteOne({ listId, kind });
   if (result.deletedCount > 0) {
-    logger.info('email template removed', { listId: listId.toHexString() });
+    logger.info('email template removed', { listId: listId.toHexString(), kind });
   }
   return result.deletedCount > 0;
 }
@@ -168,38 +181,45 @@ export interface TemplatePreviewResult {
 }
 
 /**
- * Renders an unsaved template against sample content, for the live preview on
- * the template page.
+ * Renders an unsaved template against sample data, for the live preview on the
+ * template page.
  *
- * Uses the real render path — same substitution, same guaranteed footer, same
+ * Uses the real render path — same substitution, same guaranteed chrome, same
  * sanitizer, same CSS inlining — because a preview that takes a shortcut is a
  * preview that lies about what will be sent.
  */
 export async function renderTemplatePreview(
   listId: ObjectId,
+  kind: TemplateKind,
   html: unknown,
 ): Promise<TemplatePreviewResult> {
   const list = await (await listsCollection()).findOne({ _id: listId });
   if (!list) return { ok: false, errors: ['no such list'], removed: [], html: '' };
 
-  const validation = validateTemplateHtml(html);
+  const validation = validateTemplateHtml(html, kind);
   if (!validation.ok) {
     return { ok: false, errors: validation.errors, removed: validation.removed, html: '' };
   }
 
+  // Resolved rather than left as placeholders: the preview should read like an
+  // email, not like a template.
+  const chrome = {
+    preheader: 'The line the inbox shows next to the subject.',
+    physicalAddress: list.physicalAddress,
+    listName: list.name,
+    unsubscribePlaceholder: 'https://example.com/unsubscribe',
+    confirmUrl: 'https://example.com/confirm',
+  };
+
   try {
-    const rendered = await applyTemplate({
-      templateHtml: html as string,
-      contentHtml: docToContentHtml(SAMPLE_BODY),
-      chrome: {
-        preheader: 'The line the inbox shows next to the subject.',
-        physicalAddress: list.physicalAddress,
-        listName: list.name,
-        // Resolved rather than left as a placeholder: the preview should read
-        // like an email, not like a template.
-        unsubscribePlaceholder: 'https://example.com/unsubscribe',
-      },
-    });
+    const rendered =
+      kind === 'confirmation'
+        ? await renderEmailDocument(html as string, chrome, 'confirmation')
+        : await applyTemplate({
+            templateHtml: html as string,
+            contentHtml: docToContentHtml(SAMPLE_BODY),
+            chrome,
+          });
     return { ok: true, errors: [], removed: validation.removed, html: rendered };
   } catch (err) {
     return {
@@ -211,24 +231,42 @@ export async function renderTemplatePreview(
   }
 }
 
-/** Every list, with its template if it has one. Backs the template page. */
-export async function templateSummaries(): Promise<
-  { listId: ObjectId; listName: string; html: string; stored: boolean; updatedAt?: Date }[]
-> {
+/* ------------------------------------------------------------------ */
+/* the template page                                                   */
+/* ------------------------------------------------------------------ */
+
+export interface TemplateSummary {
+  listId: ObjectId;
+  listName: string;
+  kind: TemplateKind;
+  html: string;
+  stored: boolean;
+  updatedAt?: Date;
+}
+
+/** Every list × every kind, with the stored template where there is one. */
+export async function templateSummaries(): Promise<TemplateSummary[]> {
   const lists = await (await listsCollection()).find({}).sort({ name: 1 }).toArray();
   const templates = await (await emailTemplatesCollection()).find({}).toArray();
-  const byList = new Map(templates.map((doc) => [doc.listId.toHexString(), doc]));
+  const stored = new Map(
+    templates.map((doc) => [`${doc.listId.toHexString()}:${doc.kind}`, doc]),
+  );
 
-  return lists.map((list) => {
-    const template = byList.get(list._id.toHexString());
-    return {
-      listId: list._id,
-      listName: list.name,
-      // A list with no template is shown the default, ready to save: the
-      // starting point should be a real design, not an empty box.
-      html: template?.html ?? DEFAULT_TEMPLATE_HTML,
-      stored: template !== undefined,
-      ...(template ? { updatedAt: template.updatedAt } : {}),
-    };
-  });
+  const summaries: TemplateSummary[] = [];
+  for (const list of lists) {
+    for (const kind of TEMPLATE_KINDS) {
+      const template = stored.get(`${list._id.toHexString()}:${kind}`);
+      summaries.push({
+        listId: list._id,
+        listName: list.name,
+        kind,
+        // A list with no template is shown the default, ready to save: the
+        // starting point should be a real design, not an empty box.
+        html: template?.html ?? defaultTemplateHtml(kind),
+        stored: template !== undefined,
+        ...(template ? { updatedAt: template.updatedAt } : {}),
+      });
+    }
+  }
+  return summaries;
 }

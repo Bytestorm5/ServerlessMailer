@@ -12,13 +12,15 @@ import {
   DELETE as templateDelete,
   GET as templateGet,
   PUT as templatePut,
-} from '@/app/api/admin/templates/[listId]/route';
-import { POST as templatePreviewPost } from '@/app/api/admin/templates/[listId]/preview/route';
+} from '@/app/api/admin/templates/[listId]/[kind]/route';
+import { POST as templatePreviewPost } from '@/app/api/admin/templates/[listId]/[kind]/preview/route';
 
 /** Template routes (§6.2a), including the admin guard on every one. */
 
 const AUTH = { cookie: `${ADMIN_COOKIE_NAME}=${createSessionToken('admin')}` };
 const MINIMAL = '<html><body><h1>{{list_name}}</h1>{{content}}</body></html>';
+const CONFIRMATION =
+  '<html><body><h1>{{list_name}}</h1><a href="{{confirm_url}}">Confirm</a></body></html>';
 
 function req(body?: unknown, authed = true): Request {
   return new Request('https://mail.example.com/api/admin/templates/x', {
@@ -28,7 +30,9 @@ function req(body?: unknown, authed = true): Request {
   });
 }
 
-const params = (listId: string) => ({ params: Promise.resolve({ listId }) });
+const params = (listId: string, kind = 'campaign') => ({
+  params: Promise.resolve({ listId, kind }),
+});
 
 let list: ListDoc;
 
@@ -51,7 +55,7 @@ describe('GET /api/admin/templates/[listId]', () => {
   });
 
   it('answers with the stored template once there is one', async () => {
-    await saveTemplate(list._id, MINIMAL);
+    await saveTemplate(list._id, 'campaign', MINIMAL);
     const body = await (await templateGet(req(), params(list._id.toHexString()))).json();
 
     expect(body).toMatchObject({ ok: true, stored: true, html: MINIMAL });
@@ -73,7 +77,7 @@ describe('PUT /api/admin/templates/[listId]', () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ ok: true, stored: true });
-    expect(await getTemplateHtml(list._id)).toBe(MINIMAL);
+    expect(await getTemplateHtml(list._id, 'campaign')).toBe(MINIMAL);
   });
 
   it('reports every problem at once rather than the first', async () => {
@@ -85,7 +89,7 @@ describe('PUT /api/admin/templates/[listId]', () => {
 
     expect(response.status).toBe(400);
     expect(body.errors.length).toBeGreaterThan(1);
-    expect(await getTemplateHtml(list._id)).toBeNull();
+    expect(await getTemplateHtml(list._id, 'campaign')).toBeNull();
   });
 
   it('reports what the sanitizer stripped alongside a successful save', async () => {
@@ -116,19 +120,19 @@ describe('PUT /api/admin/templates/[listId]', () => {
       params(list._id.toHexString()),
     );
     expect(response.status).toBe(401);
-    expect(await getTemplateHtml(list._id)).toBeNull();
+    expect(await getTemplateHtml(list._id, 'campaign')).toBeNull();
   });
 });
 
 describe('DELETE /api/admin/templates/[listId]', () => {
   it('returns the list to the built-in layout', async () => {
-    await saveTemplate(list._id, MINIMAL);
+    await saveTemplate(list._id, 'campaign', MINIMAL);
     const body = await (
       await templateDelete(req(), params(list._id.toHexString()))
     ).json();
 
     expect(body).toMatchObject({ ok: true, removed: true, stored: false });
-    expect(await getTemplateHtml(list._id)).toBeNull();
+    expect(await getTemplateHtml(list._id, 'campaign')).toBeNull();
   });
 
   it('is a no-op for a list that never had one', async () => {
@@ -137,11 +141,11 @@ describe('DELETE /api/admin/templates/[listId]', () => {
   });
 
   it('requires an admin session', async () => {
-    await saveTemplate(list._id, MINIMAL);
+    await saveTemplate(list._id, 'campaign', MINIMAL);
     const response = await templateDelete(req(undefined, false), params(list._id.toHexString()));
 
     expect(response.status).toBe(401);
-    expect(await getTemplateHtml(list._id)).toBe(MINIMAL);
+    expect(await getTemplateHtml(list._id, 'campaign')).toBe(MINIMAL);
   });
 });
 
@@ -155,7 +159,7 @@ describe('POST /api/admin/templates/[listId]/preview', () => {
 
     expect(response.status).toBe(200);
     expect(body.html).toContain(list.name);
-    expect(await getTemplateHtml(list._id)).toBeNull();
+    expect(await getTemplateHtml(list._id, 'campaign')).toBeNull();
   });
 
   it('surfaces a render failure as 422 rather than a blank preview', async () => {
@@ -193,5 +197,71 @@ describe('POST /api/admin/templates/[listId]/preview', () => {
       params(list._id.toHexString()),
     );
     expect(response.status).toBe(401);
+  });
+});
+
+describe('the kind in the path', () => {
+  it('rejects a kind the renderer does not know', async () => {
+    const response = await templateGet(req(), params(list._id.toHexString(), 'invoice'));
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain('kind');
+  });
+
+  it('serves the confirmation default to a list that has not chosen one', async () => {
+    const body = await (
+      await templateGet(req(), params(list._id.toHexString(), 'confirmation'))
+    ).json();
+
+    expect(body).toMatchObject({ ok: true, kind: 'confirmation', stored: false });
+    expect(body.html).toContain('{{confirm_url}}');
+  });
+
+  it('stores each kind independently', async () => {
+    await templatePut(req({ html: MINIMAL }), params(list._id.toHexString(), 'campaign'));
+    await templatePut(
+      req({ html: CONFIRMATION }),
+      params(list._id.toHexString(), 'confirmation'),
+    );
+
+    expect(await getTemplateHtml(list._id, 'campaign')).toBe(MINIMAL);
+    expect(await getTemplateHtml(list._id, 'confirmation')).toBe(CONFIRMATION);
+  });
+
+  it('refuses a campaign template stored as a confirmation one', async () => {
+    const response = await templatePut(
+      req({ html: MINIMAL }),
+      params(list._id.toHexString(), 'confirmation'),
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).errors.join(' ')).toContain('{{confirm_url}}');
+  });
+
+  it('deletes one kind without touching the other', async () => {
+    await saveTemplate(list._id, 'campaign', MINIMAL);
+    await saveTemplate(list._id, 'confirmation', CONFIRMATION);
+
+    await templateDelete(req(), params(list._id.toHexString(), 'confirmation'));
+
+    expect(await getTemplateHtml(list._id, 'confirmation')).toBeNull();
+    expect(await getTemplateHtml(list._id, 'campaign')).toBe(MINIMAL);
+  });
+
+  it('previews a confirmation template', async () => {
+    const response = await templatePreviewPost(
+      req({ html: CONFIRMATION }),
+      params(list._id.toHexString(), 'confirmation'),
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).html).toContain('https://example.com/confirm');
+  });
+
+  it('rejects an unknown kind on the preview route too', async () => {
+    const response = await templatePreviewPost(
+      req({ html: CONFIRMATION }),
+      params(list._id.toHexString(), 'receipt'),
+    );
+    expect(response.status).toBe(400);
   });
 });

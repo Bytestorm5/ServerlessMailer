@@ -85,7 +85,7 @@ export async function validateCampaignForSend(
 
   // The list's *current* template, not the frozen copy: this runs before
   // freeze, and it is the template the send is about to use.
-  const templateHtml = await getTemplateHtml(campaign.listId);
+  const templateHtml = await getTemplateHtml(campaign.listId, 'campaign');
   const htmlMode = campaignBodyMode(campaign) === 'html';
   const bodyHtmlSource = campaign.bodyHtmlSource ?? '';
 

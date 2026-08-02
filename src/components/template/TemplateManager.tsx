@@ -1,11 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { TemplateKind } from '@/lib/types';
 
-export interface TemplateListOption {
-  id: string;
-  name: string;
-  /** False when the list is still on the built-in layout. */
+export interface TemplateEntry {
+  listId: string;
+  listName: string;
+  kind: TemplateKind;
+  /** False when this email still uses the built-in layout. */
   stored: boolean;
   html: string;
   updatedAt: string | null;
@@ -18,15 +20,26 @@ export interface TemplatePlaceholderOption {
 }
 
 export interface TemplateManagerProps {
-  lists: TemplateListOption[];
-  /** The starting point, and what "Reset" restores. */
-  defaultHtml: string;
-  placeholders: TemplatePlaceholderOption[];
+  entries: TemplateEntry[];
+  /** The starting point per kind, and what "Reset" restores. */
+  defaults: Record<TemplateKind, string>;
+  placeholders: Record<TemplateKind, TemplatePlaceholderOption[]>;
 }
 
 type Width = 'desktop' | 'mobile';
 
 const WIDTHS: Record<Width, string> = { desktop: '100%', mobile: '375px' };
+
+const KIND_LABELS: Record<TemplateKind, string> = {
+  campaign: 'Campaign',
+  confirmation: 'Confirmation',
+};
+
+const KIND_BLURBS: Record<TemplateKind, string> = {
+  campaign: 'The shell around every newsletter. {{content}} is where the body lands.',
+  confirmation:
+    'The double opt-in email. It has no body slot — this is the whole email, and {{confirm_url}} is the link it exists to get clicked.',
+};
 
 const SAVE_LABELS: Record<string, string> = {
   idle: '',
@@ -35,6 +48,8 @@ const SAVE_LABELS: Record<string, string> = {
   saved: 'Saved',
   error: 'Not saved',
 };
+
+const KINDS: TemplateKind[] = ['campaign', 'confirmation'];
 
 async function jsonOrThrow(response: Response) {
   const body = (await response.json().catch(() => ({}))) as {
@@ -61,13 +76,20 @@ async function jsonOrThrow(response: Response) {
  * is: the document is operator-authored, but the admin origin holds the session
  * cookie and there is no reason to let template content run there.
  */
-export function TemplateManager({ lists, defaultHtml, placeholders }: TemplateManagerProps) {
+export function TemplateManager({ entries, defaults, placeholders }: TemplateManagerProps) {
+  const lists = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const entry of entries) seen.set(entry.listId, entry.listName);
+    return [...seen].map(([id, name]) => ({ id, name }));
+  }, [entries]);
+
   const [listId, setListId] = useState(lists[0]?.id ?? '');
+  const [kind, setKind] = useState<TemplateKind>('campaign');
   const [drafts, setDrafts] = useState<Record<string, string>>(() =>
-    Object.fromEntries(lists.map((list) => [list.id, list.html])),
+    Object.fromEntries(entries.map((entry) => [`${entry.listId}:${entry.kind}`, entry.html])),
   );
   const [stored, setStored] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(lists.map((list) => [list.id, list.stored])),
+    Object.fromEntries(entries.map((entry) => [`${entry.listId}:${entry.kind}`, entry.stored])),
   );
   const [status, setStatus] = useState<keyof typeof SAVE_LABELS>('idle');
   const [errors, setErrors] = useState<string[]>([]);
@@ -77,8 +99,9 @@ export function TemplateManager({ lists, defaultHtml, placeholders }: TemplateMa
   const [width, setWidth] = useState<Width>('desktop');
   const sourceRef = useRef<HTMLTextAreaElement>(null);
 
-  const html = drafts[listId] ?? defaultHtml;
-  const selected = useMemo(() => lists.find((list) => list.id === listId), [lists, listId]);
+  const slot = `${listId}:${kind}`;
+  const html = drafts[slot] ?? defaults[kind];
+  const listName = lists.find((list) => list.id === listId)?.name;
 
   /**
    * A list on the built-in layout is told so until it saves. Which of the two
@@ -87,21 +110,21 @@ export function TemplateManager({ lists, defaultHtml, placeholders }: TemplateMa
    */
   const statusLabel = [
     SAVE_LABELS[status] ?? '',
-    stored[listId] ? '' : 'Using the built-in layout — save to switch this list over',
+    stored[slot] ? '' : 'Using the built-in layout — save to switch this email over',
   ]
     .filter((part) => part !== '')
     .join(' · ');
 
   /**
    * Re-render on a debounce. The template is a whole document and the render
-   * runs MJML-free but still inlines CSS, so firing on every keystroke would
-   * queue requests behind each other.
+   * inlines CSS, so firing on every keystroke would queue requests behind each
+   * other.
    */
   useEffect(() => {
     if (!listId) return;
     let cancelled = false;
     const timer = setTimeout(() => {
-      void fetch(`/api/admin/templates/${listId}/preview`, {
+      void fetch(`/api/admin/templates/${listId}/${kind}/preview`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ html }),
@@ -130,15 +153,15 @@ export function TemplateManager({ lists, defaultHtml, placeholders }: TemplateMa
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [listId, html]);
+  }, [listId, kind, html]);
 
   const update = useCallback(
     (next: string) => {
-      setDrafts((current) => ({ ...current, [listId]: next }));
+      setDrafts((current) => ({ ...current, [slot]: next }));
       setStatus('dirty');
       setErrors([]);
     },
-    [listId],
+    [slot],
   );
 
   /** Inserts at the cursor rather than at the end: a template is 200 lines long. */
@@ -166,13 +189,13 @@ export function TemplateManager({ lists, defaultHtml, placeholders }: TemplateMa
     setErrors([]);
     try {
       const body = await jsonOrThrow(
-        await fetch(`/api/admin/templates/${listId}`, {
+        await fetch(`/api/admin/templates/${listId}/${kind}`, {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ html }),
         }),
       );
-      setStored((current) => ({ ...current, [listId]: true }));
+      setStored((current) => ({ ...current, [slot]: true }));
       setRemoved((body.removed as string[]) ?? []);
       setStatus('saved');
     } catch (err) {
@@ -186,10 +209,10 @@ export function TemplateManager({ lists, defaultHtml, placeholders }: TemplateMa
     setErrors([]);
     try {
       await jsonOrThrow(
-        await fetch(`/api/admin/templates/${listId}`, { method: 'DELETE' }),
+        await fetch(`/api/admin/templates/${listId}/${kind}`, { method: 'DELETE' }),
       );
-      setStored((current) => ({ ...current, [listId]: false }));
-      setDrafts((current) => ({ ...current, [listId]: defaultHtml }));
+      setStored((current) => ({ ...current, [slot]: false }));
+      setDrafts((current) => ({ ...current, [slot]: defaults[kind] }));
       setStatus('idle');
     } catch (err) {
       setStatus('error');
@@ -222,15 +245,33 @@ export function TemplateManager({ lists, defaultHtml, placeholders }: TemplateMa
           </label>
         )}
 
+        <div role="tablist" aria-label="Which email" className="sm-template-kinds">
+          {KINDS.map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="tab"
+              aria-selected={kind === option}
+              onClick={() => {
+                setKind(option);
+                setStatus('idle');
+                setErrors([]);
+              }}
+            >
+              {KIND_LABELS[option]}
+            </button>
+          ))}
+        </div>
+
         <span role="status" className={status === 'error' ? 'sm-save-error' : 'muted'}>
           {statusLabel}
         </span>
 
         <div className="sm-template-actions">
-          <button type="button" onClick={() => update(defaultHtml)}>
+          <button type="button" onClick={() => update(defaults[kind])}>
             Reset to default
           </button>
-          {stored[listId] && (
+          {stored[slot] && (
             <button type="button" onClick={() => void revertToBuiltIn()}>
               Use built-in layout
             </button>
@@ -245,6 +286,8 @@ export function TemplateManager({ lists, defaultHtml, placeholders }: TemplateMa
           </button>
         </div>
       </header>
+
+      <p className="muted">{KIND_BLURBS[kind]}</p>
 
       {errors.length > 0 && (
         <ul role="alert" className="sm-template-errors">
@@ -273,9 +316,9 @@ export function TemplateManager({ lists, defaultHtml, placeholders }: TemplateMa
           />
 
           <details className="sm-template-fields">
-            <summary>Placeholders ({placeholders.length})</summary>
+            <summary>Placeholders ({placeholders[kind].length})</summary>
             <ul>
-              {placeholders.map((placeholder) => (
+              {placeholders[kind].map((placeholder) => (
                 <li key={placeholder.key}>
                   <button type="button" onClick={() => insertPlaceholder(placeholder.key)}>
                     {'{{'}
@@ -312,7 +355,7 @@ export function TemplateManager({ lists, defaultHtml, placeholders }: TemplateMa
               ))}
             </div>
             <p className="muted">
-              Sample content, {selected?.name ?? 'this list'}&rsquo;s footer.
+              Sample data, {listName ?? 'this list'}&rsquo;s footer.
             </p>
           </header>
 

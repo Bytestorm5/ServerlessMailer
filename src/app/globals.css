@@ -553,6 +553,17 @@ textarea {
   gap: 0.75rem;
 }
 
+.sm-template-kinds {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.sm-template-kinds [aria-selected='true'] {
+  background: var(--bg);
+  border-color: var(--muted);
+  font-weight: 500;
+}
+
 .sm-template-actions {
   display: flex;
   gap: 0.4rem;

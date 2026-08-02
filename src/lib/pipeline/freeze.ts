@@ -93,7 +93,7 @@ export async function freezeCampaign(
     // The template is frozen alongside the body for the same reason the body
     // is: it carries merge fields and their fallbacks, and editing it mid-send
     // would change what SES substitutes into an email already rendered.
-    const templateHtml = await getTemplateHtml(claimed.listId);
+    const templateHtml = await getTemplateHtml(claimed.listId, 'campaign');
     const rendered = await renderCampaignForSend(claimed, list, templateHtml);
 
     const batchSize = Math.max(1, Math.min(config.batchSize(), 50));

@@ -71,7 +71,7 @@ async function freeze() {
 
 describe('freezeCampaign with a template', () => {
   it('renders through the template and stores a copy of it', async () => {
-    await saveTemplate(list._id, TEMPLATE);
+    await saveTemplate(list._id, 'campaign', TEMPLATE);
     const frozen = await freeze();
 
     expect(frozen?.bodyHtml).toContain('<h1>Domain A Weekly</h1>');
@@ -88,7 +88,7 @@ describe('freezeCampaign with a template', () => {
   it('clears a stale copy from an earlier freeze', async () => {
     // A campaign rolled back to draft after a template was removed must not
     // keep rendering against the template it no longer has.
-    await saveTemplate(list._id, TEMPLATE);
+    await saveTemplate(list._id, 'campaign', TEMPLATE);
     await createSubscriber(list._id, { email: 'first@example.com' });
     const campaign = await createCampaign(list._id, {
       status: 'draft',
@@ -105,7 +105,7 @@ describe('freezeCampaign with a template', () => {
   });
 
   it('substitutes the template’s own merge fields per recipient at send time', async () => {
-    await saveTemplate(list._id, TEMPLATE);
+    await saveTemplate(list._id, 'campaign', TEMPLATE);
     const frozen = await freeze();
 
     const batch = await claimBatch('test-run');
@@ -118,12 +118,13 @@ describe('freezeCampaign with a template', () => {
   });
 
   it('keeps substituting the frozen template after the live one changes', async () => {
-    await saveTemplate(list._id, TEMPLATE);
+    await saveTemplate(list._id, 'campaign', TEMPLATE);
     await freeze();
 
     // The operator edits the template while the send is in flight.
     await saveTemplate(
       list._id,
+      'campaign',
       TEMPLATE.replace('{{ first_name | default: "there" }}', '{{ company | default: "your team" }}'),
     );
 

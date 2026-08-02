@@ -52,6 +52,7 @@ async function storeTemplate(html: string) {
   await templates.insertOne({
     _id: new ObjectId(),
     listId: list._id,
+    kind: 'campaign',
     html,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -378,6 +379,7 @@ describe('a campaign rendered through a custom template', () => {
   it('passes, and picks up the template as well as the body', async () => {
     await saveTemplate(
       list._id,
+      'campaign',
       '<html><body><p>Hi {{ first_name | default: "there" }}</p>{{content}}' +
         '<p>{{physical_address}}</p><a href="{{unsubscribe_url}}">Out</a></body></html>',
     );

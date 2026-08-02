@@ -11,6 +11,7 @@ import { clientIp } from '@/lib/request-context';
 import { getSesAdapter } from '@/lib/ses/registry';
 import { setConfirmToken, upsertPendingSubscriber } from '@/lib/subscribers';
 import { isSuppressed } from '@/lib/suppressions';
+import { getTemplateHtml } from '@/lib/templates';
 import { verifyTurnstile } from '@/lib/turnstile';
 
 export const runtime = 'nodejs';
@@ -170,7 +171,13 @@ export async function POST(request: Request): Promise<Response> {
       replyTo: list.replyTo,
       to: check.email,
       configurationSet: list.sesConfigurationSet,
-      content: buildConfirmationEmail(list, token),
+      content: await buildConfirmationEmail({
+        list,
+        token,
+        templateHtml: await getTemplateHtml(list._id, 'confirmation'),
+        attributes: subscriber.attributes,
+        email: check.email,
+      }),
     });
   } catch (err) {
     // The pending record is deliberately left in place so a later resend can

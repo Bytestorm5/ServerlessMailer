@@ -217,3 +217,48 @@ that twitches is not one.
 
 The state is now `aria-busy` on the preview region — no layout, no reflow, and
 assistive technology still learns that the panel is stale.
+
+### The confirmation email is a template kind, not a second system
+
+Putting the double opt-in email (§5.4) under the same editor as the newsletter
+raised one real question: is it a *shell* with a slot, like a campaign template,
+or is it the whole email?
+
+**The whole email.** A campaign has a body written elsewhere, so its template
+needs `{{content}}`; a confirmation email's copy — the greeting, the sentence
+explaining why it arrived, the "if you didn't subscribe, ignore this" line — *is*
+the design. Splitting that into app-owned copy and an operator-owned wrapper
+would leave the operator unable to change the one paragraph most worth changing.
+
+So `EmailTemplateDoc` gained a `kind`, the unique index moved to
+`{listId, kind}`, and validation became kind-aware: a campaign template must
+have `{{content}}` and must not use `{{confirm_url}}`; a confirmation template
+must have `{{confirm_url}}` and must not use `{{unsubscribe_url}}`. That last
+rule is not pedantry — an unsubscribe link in a confirmation email offers to
+remove a subscription that does not exist yet, and the one-click endpoint would
+have nothing to act on.
+
+Two things stay app-owned. The **subject** is still
+`Confirm your subscription to <list>`, because it is the line that makes the
+email recognisable in an inbox and nothing about a template says it should
+change. The **confirmation link** is guaranteed into the output exactly the way
+the unsubscribe link is guaranteed into a campaign: a template that forgets it
+gets one appended rather than sending a dead email.
+
+The plain-text part is now derived from the rendered HTML rather than written
+alongside it. A separately-authored text part is a text part that goes stale the
+first time somebody edits the design.
+
+### Both default templates were rebuilt around one design
+
+The defaults are what most lists will actually send, so they are not
+placeholders. Both now share a cream page, a rounded paper card held to 600px by
+an MSO-only table — Word ignores `max-width`, so a fixed 600 would still be 600
+on a phone — a serif wordmark, and a sign-off outside the card. The confirmation
+default adds a bulletproof button: a background-coloured table cell for clients
+that drop CSS on anchors, with a VML shape behind it for Outlook, which drops
+`border-radius` and padding.
+
+The wordmark is **text, not an image**. A default that points at a logo URL
+nobody has uploaded renders as a broken-image icon in every inbox; the commented
+`<img>` beside it is the two-line swap for operators who have one.

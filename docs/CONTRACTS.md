@@ -222,28 +222,45 @@ never routed through the click redirector.
 ## 9b. `src/lib/render/template.ts`
 
 ```ts
-export const DEFAULT_TEMPLATE_HTML: string;
-export const TEMPLATE_PLACEHOLDERS: readonly { key: string; label: string; description: string }[];
-export const TEMPLATE_ONLY_PLACEHOLDERS: readonly string[];   // content, preheader
+export const DEFAULT_TEMPLATE_HTML: string;               // kind: campaign
+export const DEFAULT_CONFIRMATION_TEMPLATE_HTML: string;  // kind: confirmation
+export function defaultTemplateHtml(kind: TemplateKind): string;
+export function isTemplateKind(value: unknown): value is TemplateKind;
+export const TEMPLATE_PLACEHOLDERS:
+  Record<TemplateKind, readonly { key: string; label: string; description: string }[]>;
+export const TEMPLATE_ONLY_PLACEHOLDERS: readonly string[];  // content, preheader, confirm_url
 export const MAX_TEMPLATE_LENGTH: number;
 export class TemplateRenderError extends Error {}
 export function stripTemplateOnlyPlaceholders(html: string): string;
 export function hasContentSlot(html: string): boolean;
-export function validateTemplateHtml(input: unknown):
+export function validateTemplateHtml(input: unknown, kind?: TemplateKind):
   { ok: boolean; errors: string[]; removed: string[] };
-export async function renderEmailDocument(documentHtml: string, chrome: EmailChrome): Promise<string>;
+export interface TemplateChrome extends EmailChrome { confirmUrl?: string }
+export async function renderEmailDocument(
+  documentHtml: string, chrome: TemplateChrome, kind?: TemplateKind,
+): Promise<string>;
 export async function applyTemplate(input: {
-  templateHtml: string; contentHtml: string; chrome: EmailChrome;
+  templateHtml: string; contentHtml: string; chrome: TemplateChrome;
 }): Promise<string>;
 ```
 
-`applyTemplate` substitutes the body into `{{content}}`, resolves the
-campaign-constant placeholders (`preheader`, `list_name`, `physical_address`,
-`unsubscribe_url`), guarantees the legally required footer, appends the open
-pixel, sanitizes, and inlines CSS with `juice` — lazily imported, like `mjml`.
-Per-recipient placeholders are deliberately left unresolved so the frozen body
-still doubles as an SES template. `renderEmailDocument` is the same pipeline
-minus the slot, for a body pasted as a whole HTML document.
+`applyTemplate` substitutes the body into `{{content}}` and hands off to
+`renderEmailDocument`, which resolves the send-constant placeholders
+(`preheader`, `list_name`, `physical_address`), guarantees the chrome, appends
+the open pixel, sanitizes, and inlines CSS with `juice` — lazily imported, like
+`mjml`.
+
+The guarantee depends on the kind. A `campaign` resolves
+`{{unsubscribe_url}}` to whatever the chrome says — the bare SES placeholder for
+a real send, a signed URL for a preview — and appends an unsubscribe link and
+the postal address if the template omitted them. A `confirmation` resolves
+`{{confirm_url}}` to a real URL (there is no SES template on that path),
+appends the confirmation link if the template omitted it, throws when the caller
+supplied none, and adds no unsubscribe link at all. Validation enforces the same
+split: each kind requires its own placeholder and refuses the other's.
+
+`renderEmailDocument` is also called directly for a campaign body pasted as a
+whole HTML document, which earns the same guarantees a template gets.
 
 ## 10. `src/lib/render/campaign.ts`
 
@@ -606,26 +623,44 @@ writing nothing to `sent_log`, batches or campaign counts. It signs the
 unsubscribe link with a synthetic subscriber id and refuses a suppressed
 address.
 
+## 28c. `src/lib/email/confirmation.ts`
+
+```ts
+export function confirmationUrl(token: string): string;
+export async function buildConfirmationEmail(input: {
+  list: ListDoc; token: string;
+  templateHtml?: string | null;                 // the list's confirmation template
+  attributes?: Record<string, string>; email?: string;
+}): Promise<EmailContent>;
+```
+
+Sent immediately via SES on signup (§5.1 step 7) and by the pending-confirmation
+drain, as a single `sendSimple` — so unlike a campaign there is no SES template
+doing per-recipient substitution, and every merge field is resolved before
+rendering. With no `templateHtml` it returns the built-in plain email; with one
+it renders through `renderEmailDocument` at kind `confirmation` and derives the
+plain-text part from the rendered HTML. The subject is app-owned either way.
+
 ## 28b. `src/lib/templates.ts`
 
 ```ts
-export async function getTemplate(listId: ObjectId): Promise<EmailTemplateDoc | null>;
-export async function getTemplateHtml(listId: ObjectId): Promise<string | null>;
-export async function saveTemplate(listId: ObjectId, html: unknown, now?: Date):
+export async function getTemplate(listId: ObjectId, kind?: TemplateKind): Promise<EmailTemplateDoc | null>;
+export async function getTemplateHtml(listId: ObjectId, kind?: TemplateKind): Promise<string | null>;
+export async function saveTemplate(listId: ObjectId, kind: TemplateKind, html: unknown, now?: Date):
   Promise<{ ok: boolean; errors: string[]; removed: string[]; template?: EmailTemplateDoc }>;
-export async function deleteTemplate(listId: ObjectId): Promise<boolean>;
-export async function renderTemplatePreview(listId: ObjectId, html: unknown):
+export async function deleteTemplate(listId: ObjectId, kind?: TemplateKind): Promise<boolean>;
+export async function renderTemplatePreview(listId: ObjectId, kind: TemplateKind, html: unknown):
   Promise<{ ok: boolean; errors: string[]; removed: string[]; html: string }>;
-export async function templateSummaries(): Promise<TemplateSummary[]>;
+export async function templateSummaries(): Promise<TemplateSummary[]>;   // every list × every kind
 ```
 
-One template per list, enforced by a unique index on `email_templates.listId`.
-`getTemplateHtml` returning `null` is what "this list uses the built-in MJML
-layout" means, and it is decided in exactly one place. A template is stored only
-if `validateTemplateHtml` passes; sanitizer removals are reported but do not
-block a save, because the output is already safe and a hard block on a stray
-`<script>` teaches people to fight the editor. `deleteTemplate` is the way back,
-and it cannot change an email already frozen.
+One template per list per kind, enforced by a unique index on
+`{listId, kind}`. `getTemplateHtml` returning `null` is what "this email uses
+the built-in layout" means, and it is decided in exactly one place. A template
+is stored only if `validateTemplateHtml` passes for its kind; sanitizer removals
+are reported but do not block a save, because the output is already safe and a
+hard block on a stray `<script>` teaches people to fight the editor.
+`deleteTemplate` is the way back, and it cannot change an email already frozen.
 
 ## 29. API routes — `src/app/api/**`
 
@@ -646,8 +681,8 @@ Handlers are thin: parse, delegate to a lib function, shape the response.
 | `/api/admin/lists` | GET, POST | §3.1 list configuration. POST returns 201. |
 | `/api/admin/lists/[id]` | GET, PATCH, DELETE | PATCH is partial. DELETE returns 409 for a list in use. |
 | `/api/admin/lists/[id]/test` | POST | §6.5 test send from the list identity, no campaign. |
-| `/api/admin/templates/[listId]` | GET, PUT, DELETE | §6.2a. GET falls back to the default; DELETE reverts to the built-in layout. |
-| `/api/admin/templates/[listId]/preview` | POST | §6.2a. Renders an unsaved template against sample content; 422 when it does not render. |
+| `/api/admin/templates/[listId]/[kind]` | GET, PUT, DELETE | §6.2a. `kind` is `campaign` or `confirmation`. GET falls back to the default; DELETE reverts to the built-in layout. |
+| `/api/admin/templates/[listId]/[kind]/preview` | POST | §6.2a. Renders an unsaved template against sample data; 422 when it does not render. |
 | `/api/admin/**` | * | Session-authenticated; all campaign/subscriber writes. |
 
 All admin routes must return 401 without a valid session. The subscribe,
@@ -663,6 +698,7 @@ modal restating recipient count, list name, from, reply-to and subject, with
 typed confirmation above `config.typedConfirmationThreshold()`. A Rich text /
 HTML toggle on the composition screen swaps the editor for a paste box without
 discarding either source (§6.1). `/admin/templates` is the template editor:
-HTML source on the left, live server-rendered preview in a sandboxed iframe on
-the right, a placeholder reference that inserts at the cursor, and one button
-back to the built-in layout (§6.2a).
+a list picker and a Campaign / Confirmation tab pair, HTML source on the left,
+live server-rendered preview in a sandboxed iframe on the right, a per-kind
+placeholder reference that inserts at the cursor, and one button back to the
+built-in layout (§6.2a).

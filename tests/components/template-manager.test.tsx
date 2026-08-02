@@ -13,22 +13,54 @@ import { TemplateManager } from '@/components/template/TemplateManager';
  */
 
 const DEFAULT_HTML = '<html><body><h1>{{list_name}}</h1>{{content}}</body></html>';
+const DEFAULT_CONFIRMATION = '<html><body><a href="{{confirm_url}}">Confirm</a></body></html>';
 
-const LISTS = [
-  { id: 'list-1', name: 'Domain A Weekly', stored: false, html: DEFAULT_HTML, updatedAt: null },
+const ENTRIES = [
   {
-    id: 'list-2',
-    name: 'Domain B Monthly',
+    listId: 'list-1',
+    listName: 'Domain A Weekly',
+    kind: 'campaign' as const,
+    stored: false,
+    html: DEFAULT_HTML,
+    updatedAt: null,
+  },
+  {
+    listId: 'list-1',
+    listName: 'Domain A Weekly',
+    kind: 'confirmation' as const,
+    stored: true,
+    html: '<html><body>A <a href="{{confirm_url}}">Go</a></body></html>',
+    updatedAt: '2026-07-31T10:00:00.000Z',
+  },
+  {
+    listId: 'list-2',
+    listName: 'Domain B Monthly',
+    kind: 'campaign' as const,
     stored: true,
     html: '<html><body>B{{content}}</body></html>',
     updatedAt: '2026-07-31T10:00:00.000Z',
   },
+  {
+    listId: 'list-2',
+    listName: 'Domain B Monthly',
+    kind: 'confirmation' as const,
+    stored: false,
+    html: DEFAULT_CONFIRMATION,
+    updatedAt: null,
+  },
 ];
 
-const PLACEHOLDERS = [
-  { key: 'content', label: 'Campaign body', description: 'Required.' },
-  { key: 'list_name', label: 'Newsletter name', description: 'The list name.' },
-];
+const DEFAULTS = { campaign: DEFAULT_HTML, confirmation: DEFAULT_CONFIRMATION };
+
+const PLACEHOLDERS = {
+  campaign: [
+    { key: 'content', label: 'Campaign body', description: 'Required.' },
+    { key: 'list_name', label: 'Newsletter name', description: 'The list name.' },
+  ],
+  confirmation: [
+    { key: 'confirm_url', label: 'Confirmation link', description: 'Required.' },
+  ],
+};
 
 function mockFetch(overrides: Record<string, () => Response> = {}) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -48,8 +80,8 @@ function mockFetch(overrides: Record<string, () => Response> = {}) {
 function setup(overrides: Partial<React.ComponentProps<typeof TemplateManager>> = {}) {
   render(
     <TemplateManager
-      lists={LISTS}
-      defaultHtml={DEFAULT_HTML}
+      entries={ENTRIES}
+      defaults={DEFAULTS}
       placeholders={PLACEHOLDERS}
       {...overrides}
     />,
@@ -86,7 +118,7 @@ describe('TemplateManager — the source', () => {
 
     await user.type(screen.getByLabelText(/template html/i), 'x');
     await user.selectOptions(screen.getByRole('combobox'), 'list-2');
-    expect(screen.getByLabelText(/template html/i)).toHaveValue(LISTS[1].html);
+    expect(screen.getByLabelText(/template html/i)).toHaveValue(ENTRIES[2].html);
 
     await user.selectOptions(screen.getByRole('combobox'), 'list-1');
     expect(screen.getByLabelText(/template html/i)).toHaveValue(`${DEFAULT_HTML}x`);
@@ -94,14 +126,14 @@ describe('TemplateManager — the source', () => {
 
   it('hides the list picker when there is only one list', () => {
     mockFetch();
-    setup({ lists: [LISTS[0]] });
+    setup({ entries: [ENTRIES[0], ENTRIES[1]] });
 
     expect(screen.queryByRole('combobox')).toBeNull();
   });
 
   it('explains itself when there are no lists at all', () => {
     mockFetch();
-    setup({ lists: [] });
+    setup({ entries: [] });
 
     expect(screen.getByText(/create one on the lists page/i)).toBeInTheDocument();
   });
@@ -109,7 +141,7 @@ describe('TemplateManager — the source', () => {
   it('inserts a placeholder at the cursor rather than at the end', async () => {
     const user = userEvent.setup();
     mockFetch();
-    setup({ lists: [{ ...LISTS[0], html: 'AB' }] });
+    setup({ entries: [{ ...ENTRIES[0], html: 'AB' }] });
 
     const field = screen.getByLabelText(/template html/i) as HTMLTextAreaElement;
     await user.click(screen.getByText(/placeholders/i));
@@ -136,7 +168,7 @@ describe('TemplateManager — the preview', () => {
 
   it('surfaces a render failure instead of showing a stale preview', async () => {
     mockFetch({
-      'POST /api/admin/templates/list-1/preview': () =>
+      'POST /api/admin/templates/list-1/campaign/preview': () =>
         Response.json({ ok: false, errors: ['template must contain {{content}}'] }, { status: 422 }),
     });
     setup();
@@ -147,7 +179,7 @@ describe('TemplateManager — the preview', () => {
 
   it('reports what the sanitizer will strip', async () => {
     mockFetch({
-      'POST /api/admin/templates/list-1/preview': () =>
+      'POST /api/admin/templates/list-1/campaign/preview': () =>
         Response.json({ ok: true, html: '<html></html>', removed: ['<script>'] }),
     });
     setup();
@@ -166,7 +198,7 @@ describe('TemplateManager — saving', () => {
 
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/saved/i));
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/admin/templates/list-1',
+      '/api/admin/templates/list-1/campaign',
       expect.objectContaining({ method: 'PUT' }),
     );
   });
@@ -174,7 +206,7 @@ describe('TemplateManager — saving', () => {
   it('shows every reason a save was refused, not just the first', async () => {
     const user = userEvent.setup();
     mockFetch({
-      'PUT /api/admin/templates/list-1': () =>
+      'PUT /api/admin/templates/list-1/campaign': () =>
         Response.json(
           { ok: false, errors: ['unknown placeholder {{nonsense}}', '{{first_name}} needs a fallback'] },
           { status: 400 },
@@ -215,10 +247,79 @@ describe('TemplateManager — saving', () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        '/api/admin/templates/list-2',
+        '/api/admin/templates/list-2/campaign',
         expect.objectContaining({ method: 'DELETE' }),
       ),
     );
     expect(screen.getByLabelText(/template html/i)).toHaveValue(DEFAULT_HTML);
+  });
+});
+
+describe('TemplateManager — the two kinds', () => {
+  const kindTab = (name: RegExp) =>
+    within(screen.getByRole('tablist', { name: /which email/i })).getByRole('tab', { name });
+
+  it('opens on the campaign template', () => {
+    mockFetch();
+    setup();
+
+    expect(kindTab(/campaign/i)).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByLabelText(/template html/i)).toHaveValue(DEFAULT_HTML);
+  });
+
+  it('switches to the confirmation template without losing the campaign draft', async () => {
+    const user = userEvent.setup();
+    mockFetch();
+    setup();
+
+    await user.type(screen.getByLabelText(/template html/i), 'x');
+    await user.click(kindTab(/confirmation/i));
+    expect(screen.getByLabelText(/template html/i)).toHaveValue(ENTRIES[1].html);
+
+    await user.click(kindTab(/campaign/i));
+    expect(screen.getByLabelText(/template html/i)).toHaveValue(`${DEFAULT_HTML}x`);
+  });
+
+  it('tracks stored-vs-built-in per kind, not per list', async () => {
+    const user = userEvent.setup();
+    mockFetch();
+    setup();
+
+    expect(screen.getByRole('status')).toHaveTextContent(/built-in layout/i);
+    await user.click(kindTab(/confirmation/i));
+    expect(screen.getByRole('status')).not.toHaveTextContent(/built-in layout/i);
+  });
+
+  it('shows the placeholders that belong to the kind on screen', async () => {
+    const user = userEvent.setup();
+    mockFetch();
+    setup();
+
+    await user.click(kindTab(/confirmation/i));
+    await user.click(screen.getByText(/placeholders/i));
+
+    const fields = within(screen.getByRole('list'));
+    expect(fields.getByRole('button', { name: /confirm_url/i })).toBeInTheDocument();
+    expect(fields.queryByRole('button', { name: /content/i })).toBeNull();
+  });
+
+  it('saves and previews against the kind in the path', async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetch();
+    setup();
+
+    await user.click(kindTab(/confirmation/i));
+    await user.click(screen.getByRole('button', { name: /save template/i }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/admin/templates/list-1/confirmation',
+      expect.objectContaining({ method: 'PUT' }),
+    );
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/admin/templates/list-1/confirmation/preview',
+        expect.anything(),
+      ),
+    );
   });
 });

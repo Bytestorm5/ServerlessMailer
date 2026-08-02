@@ -75,7 +75,7 @@ export const POST = withAdmin<Ctx>(async (request, ctx) => {
   try {
     // The list's current template, so editing the template page and reloading
     // the campaign shows the change.
-    const templateHtml = await getTemplateHtml(campaign.listId);
+    const templateHtml = await getTemplateHtml(campaign.listId, 'campaign');
     const rendered = await renderCampaignPreview(draft, list, recipient, templateHtml);
     return Response.json({ ok: true, ...rendered });
   } catch (err) {

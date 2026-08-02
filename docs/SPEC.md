@@ -301,7 +301,9 @@ This record is what you produce if a complaint is ever escalated. Treat it as ap
 
 ### 5.4 Confirmation email content
 
-Plain, short, and obviously transactional. One clear call to action. No marketing content, no images, no tracking. It should look nothing like a newsletter, because its deliverability requirements are different and its job is singular.
+Plain, short, and obviously transactional. One clear call to action. No marketing content and no tracking. It should look nothing like a newsletter, because its deliverability requirements are different and its job is singular.
+
+A list may replace it wholesale with a `confirmation` template (§6.2a) — the design is the operator's, but the singular job is not: the confirmation link is guaranteed into the output and an unsubscribe link is refused.
 
 ---
 
@@ -326,15 +328,23 @@ The daily-use surface. If this is unpleasant, the project has failed regardless 
 
 ### 6.2a Templates
 
-The generated layout can only ever be the layout its generator knows about. A **template** is the escape hatch: one hand-authored HTML document per list, edited at `/admin/templates`, with a `{{content}}` slot where the campaign body lands.
+The generated layout can only ever be the layout its generator knows about. A **template** is the escape hatch: a hand-authored HTML document, edited at `/admin/templates`.
 
-- **Opt-in per list.** A list with no stored template renders through the built-in MJML layout, unchanged. Storing one switches that list over; deleting it switches back. A pasted-HTML *fragment* always renders through a template — the built-in default when the list has not chosen one — because a fragment with no document around it is not an email.
-- **The default template** is the branded shell the portal's transactional email already uses, so a newsletter and a "your application was received" look like they came from the same organisation.
+There are **two kinds**, because a list sends two emails worth designing:
+
+| Kind | What it is | Required placeholder | Carries an unsubscribe link |
+|---|---|---|---|
+| `campaign` | The newsletter shell | `{{content}}` — where the body lands | Yes |
+| `confirmation` | The double opt-in email (§5.4) — the whole email, copy included | `{{confirm_url}}` | No: there is nothing to unsubscribe from until it is clicked |
+
+- **Opt-in per list, per kind.** A list with no stored template of a kind renders that email through the built-in layout, unchanged. Storing one switches it over; deleting it switches back. A pasted-HTML *fragment* always renders through a campaign template — the built-in default when the list has not chosen one — because a fragment with no document around it is not an email.
+- **The defaults share one design**: a cream page, a rounded paper card held to 600px by an MSO-only table, a serif wordmark, and a bulletproof VML button in the confirmation email. A newsletter and a "confirm your subscription" arrive looking like they came from the same organisation.
+- **A confirmation email resolves everything before sending.** It goes out as a single SES `sendSimple`, not through a bulk template, so merge fields and `{{confirm_url}}` are substituted at build time rather than left as placeholders. Its plain-text part is derived from the rendered HTML, so a rewritten template cannot leave the text part saying something else.
 - **Full HTML, minus active content.** Tables, VML, `<style>` blocks, media queries and MSO conditional comments all survive. Script and embedded elements, `on*` handlers, unsafe URL schemes, `<base>` and `<meta http-equiv>` do not. Removals are reported to the operator; they do not block a save or a send, because the output is already safe.
 - **CSS is inlined** before sending. Gmail drops `<style>`, so a template whose typography lives in a stylesheet would arrive unstyled for a large share of the list. Media queries, which cannot be inlined, are preserved.
-- **The footer is guaranteed, not requested.** A template that omits the postal address or the unsubscribe link gets the missing part appended. Both are legally required and neither is behind a flag.
+- **The chrome is guaranteed, not requested.** A campaign template that omits the postal address or the unsubscribe link, or a confirmation template that omits the confirmation link, gets the missing part appended. None of it is behind a flag.
 - **Merge fields work in the template** and are held to the same §6.6 rules as the body: every non-system field needs a fallback.
-- **The template is frozen with the body** (§7.1). It is where the merge fields and their fallbacks live, and SES substitutes them per recipient long after freeze, so editing the template mid-send must not change an email already rendered.
+- **The campaign template is frozen with the body** (§7.1). It is where the merge fields and their fallbacks live, and SES substitutes them per recipient long after freeze, so editing the template mid-send must not change an email already rendered.
 
 ### 6.3 Preview
 

@@ -480,7 +480,7 @@ export async function sendListTestEmail(input: {
   const ses = await getSesAdapter();
   // Rendered through the list's own template, so what lands in the inbox is
   // what a campaign would look like rather than a generic stand-in.
-  const templateHtml = await getTemplateHtml(list._id);
+  const templateHtml = await getTemplateHtml(list._id, 'campaign');
   let sent = 0;
 
   for (const address of addresses) {

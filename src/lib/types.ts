@@ -244,15 +244,26 @@ export interface CampaignVersionDoc {
 /* -------------------------------------------------------- email_templates */
 
 /**
- * One hand-authored HTML template per list (§6.2a).
+ * The two emails a list sends that are worth designing (§6.2a).
  *
- * The document is the whole email minus the body: a `{{content}}` slot marks
- * where the campaign lands. A list with no template document renders through
- * the built-in MJML layout instead, which is what every list starts with.
+ * `campaign` is the newsletter shell — the whole email minus the body, with a
+ * `{{content}}` slot where the campaign lands. `confirmation` is the double
+ * opt-in email (§5.4), which has no body to slot in: it is a complete email
+ * whose one job is to get `{{confirm_url}}` clicked.
+ */
+export const TEMPLATE_KINDS = ['campaign', 'confirmation'] as const;
+export type TemplateKind = (typeof TEMPLATE_KINDS)[number];
+
+/**
+ * One hand-authored HTML template per list, per kind (§6.2a).
+ *
+ * A list with no template document for a kind renders that email through the
+ * built-in layout instead, which is what every list starts with.
  */
 export interface EmailTemplateDoc {
   _id: ObjectId;
   listId: ObjectId;
+  kind: TemplateKind;
   html: string;
   createdAt: Date;
   updatedAt: Date;

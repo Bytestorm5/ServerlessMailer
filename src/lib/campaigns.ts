@@ -305,7 +305,7 @@ export async function sendTestEmail(input: {
   );
 
   const ses = await getSesAdapter();
-  const templateHtml = await getTemplateHtml(campaign.listId);
+  const templateHtml = await getTemplateHtml(campaign.listId, 'campaign');
   let sent = 0;
 
   for (const address of input.to) {
