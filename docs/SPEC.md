@@ -313,6 +313,7 @@ The daily-use surface. If this is unpleasant, the project has failed regardless 
 
 - **Source of truth is Markdown** (or structured editor JSON), not HTML. HTML is a render target.
 - Editor supports headings, bold/italic, links, lists, blockquotes, images, and horizontal rules. That is the complete list. Resist additions.
+- A campaign may instead be written as **pasted HTML** (`bodyMode: 'html'`). This is an escape hatch, not a second editor: the node set stays closed for everything that goes through the editor, and the pasted markup is governed by the sanitizer in §6.2a rather than by the node set. A fragment fills the template's `{{content}}` slot; a whole `<html>` document is the email. Both sources are kept when the writer switches, so changing their mind costs nothing.
 - Autosave on a debounce, with a visible saved-state indicator and a recoverable version history of at least the last 20 saves.
 - Full-width, distraction-light writing surface. This is a writing tool.
 
@@ -322,6 +323,18 @@ The daily-use surface. If this is unpleasant, the project has failed regardless 
 - CSS inlined at render time.
 - A plain-text alternative is auto-generated from the Markdown source and sent as `multipart/alternative`. This is not optional; HTML-only sends are a deliverability penalty.
 - Rendered HTML is **frozen** onto the campaign document at send time and never re-rendered. A template change mid-send must not produce two different emails.
+
+### 6.2a Templates
+
+The generated layout can only ever be the layout its generator knows about. A **template** is the escape hatch: one hand-authored HTML document per list, edited at `/admin/templates`, with a `{{content}}` slot where the campaign body lands.
+
+- **Opt-in per list.** A list with no stored template renders through the built-in MJML layout, unchanged. Storing one switches that list over; deleting it switches back. A pasted-HTML *fragment* always renders through a template — the built-in default when the list has not chosen one — because a fragment with no document around it is not an email.
+- **The default template** is the branded shell the portal's transactional email already uses, so a newsletter and a "your application was received" look like they came from the same organisation.
+- **Full HTML, minus active content.** Tables, VML, `<style>` blocks, media queries and MSO conditional comments all survive. Script and embedded elements, `on*` handlers, unsafe URL schemes, `<base>` and `<meta http-equiv>` do not. Removals are reported to the operator; they do not block a save or a send, because the output is already safe.
+- **CSS is inlined** before sending. Gmail drops `<style>`, so a template whose typography lives in a stylesheet would arrive unstyled for a large share of the list. Media queries, which cannot be inlined, are preserved.
+- **The footer is guaranteed, not requested.** A template that omits the postal address or the unsubscribe link gets the missing part appended. Both are legally required and neither is behind a flag.
+- **Merge fields work in the template** and are held to the same §6.6 rules as the body: every non-system field needs a fallback.
+- **The template is frozen with the body** (§7.1). It is where the merge fields and their fallbacks live, and SES substitutes them per recipient long after freeze, so editing the template mid-send must not change an email already rendered.
 
 ### 6.3 Preview
 
@@ -350,7 +363,7 @@ A campaign cannot transition to `sending` unless every check passes. Hard block,
 | Check | Rationale |
 |---|---|
 | Subject line non-empty | — |
-| Body non-empty and not image-only | Image-only bodies are a spam signal |
+| Body non-empty and not image-only | Image-only bodies are a spam signal. Judged against whichever source the body mode selects |
 | Physical postal address present | Legally required |
 | Unsubscribe placeholder present in body | Legally required |
 | All merge fields have fallbacks | Prevents "Hi ," |

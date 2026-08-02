@@ -2,6 +2,7 @@ import {
   campaignBatchesCollection,
   campaignVersionsCollection,
   campaignsCollection,
+  emailTemplatesCollection,
   eventsCollection,
   importAttestationsCollection,
   rateLimitsCollection,
@@ -27,6 +28,7 @@ export async function ensureIndexes(): Promise<void> {
     sentLog,
     events,
     versions,
+    templates,
     rateLimits,
     seeds,
     attestations,
@@ -38,6 +40,7 @@ export async function ensureIndexes(): Promise<void> {
     sentLogCollection(),
     eventsCollection(),
     campaignVersionsCollection(),
+    emailTemplatesCollection(),
     rateLimitsCollection(),
     seedAddressesCollection(),
     importAttestationsCollection(),
@@ -81,6 +84,10 @@ export async function ensureIndexes(): Promise<void> {
     ),
 
     versions.createIndex({ campaignId: 1, createdAt: -1 }, { name: 'campaignId_createdAt' }),
+
+    // One template per list, enforced by the database rather than by the
+    // upsert: two templates for one list is an ambiguous render.
+    templates.createIndex({ listId: 1 }, { unique: true, name: 'listId_unique' }),
 
     // Mongo's TTL monitor reaps expired rate-limit windows.
     rateLimits.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: 'ttl' }),

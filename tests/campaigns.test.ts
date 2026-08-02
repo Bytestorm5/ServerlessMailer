@@ -378,3 +378,105 @@ describe('test sends', () => {
     });
   });
 });
+
+describe('body modes', () => {
+  it('starts a new campaign in rich text mode', async () => {
+    const campaign = await createCampaign({ listId: list._id });
+    expect(campaign.bodyMode).toBe('rich');
+  });
+
+  it('stores a pasted HTML body and the mode alongside it', async () => {
+    const campaign = await createCampaign({ listId: list._id });
+    const result = await updateCampaignDraft({
+      campaignId: campaign._id,
+      bodyMode: 'html',
+      bodyHtmlSource: '<table><tr><td>Designed elsewhere</td></tr></table>',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.campaign.bodyMode).toBe('html');
+    expect(result.ok && result.campaign.bodyHtmlSource).toContain('Designed elsewhere');
+  });
+
+  it('does not hold pasted HTML to the closed node set', async () => {
+    // The sanitizer is what makes pasted markup safe, at render time. Rejecting
+    // a <table> here would defeat the entire point of the mode.
+    const campaign = await createCampaign({ listId: list._id });
+    const result = await updateCampaignDraft({
+      campaignId: campaign._id,
+      bodyMode: 'html',
+      bodyHtmlSource: '<table role="presentation"><tr><td><v:roundrect /></td></tr></table>',
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('refuses an HTML body too large to re-render on every keystroke', async () => {
+    const campaign = await createCampaign({ listId: list._id });
+    const result = await updateCampaignDraft({
+      campaignId: campaign._id,
+      bodyHtmlSource: 'x'.repeat(200_001),
+    });
+
+    expect(result).toMatchObject({ ok: false, reason: 'invalid_body' });
+  });
+
+  it('snapshots the previous body and mode before overwriting them', async () => {
+    const campaign = await createCampaign({ listId: list._id });
+    await updateCampaignDraft({
+      campaignId: campaign._id,
+      bodyMode: 'html',
+      bodyHtmlSource: '<p>First</p>',
+    });
+    await updateCampaignDraft({ campaignId: campaign._id, bodyHtmlSource: '<p>Second</p>' });
+
+    const versions = await listCampaignVersions(campaign._id);
+    expect(versions[0].bodyHtmlSource).toBe('<p>First</p>');
+    expect(versions[0].bodyMode).toBe('html');
+  });
+
+  it('restores the mode along with the body, so a version is a state you can return to', async () => {
+    const campaign = await createCampaign({ listId: list._id });
+    await updateCampaignDraft({
+      campaignId: campaign._id,
+      bodyMode: 'html',
+      bodyHtmlSource: '<p>Pasted</p>',
+    });
+    await updateCampaignDraft({ campaignId: campaign._id, bodyMode: 'rich' });
+
+    // The snapshot taken by the second update holds the html-mode state.
+    const versions = await listCampaignVersions(campaign._id);
+    const htmlVersion = versions.find((version) => version.bodyMode === 'html')!;
+    expect(await restoreCampaignVersion(campaign._id, htmlVersion._id)).toBe(true);
+
+    const restored = await (await campaignsCollection()).findOne({ _id: campaign._id });
+    expect(restored).toMatchObject({ bodyMode: 'html', bodyHtmlSource: '<p>Pasted</p>' });
+  });
+
+  it('restores a version written before HTML mode existed as rich text', async () => {
+    const campaign = await createCampaign({ listId: list._id });
+    await updateCampaignDraft({ campaignId: campaign._id, subject: 'Changed' });
+
+    const [version] = await listCampaignVersions(campaign._id);
+    await (await campaignVersionsCollection()).updateOne(
+      { _id: version._id },
+      { $unset: { bodyMode: '', bodyHtmlSource: '' } },
+    );
+
+    expect(await restoreCampaignVersion(campaign._id, version._id)).toBe(true);
+    const restored = await (await campaignsCollection()).findOne({ _id: campaign._id });
+    expect(restored?.bodyMode).toBe('rich');
+  });
+
+  it('rejects an unrecognised mode at the route, rather than storing it', async () => {
+    // A mode the renderer does not know would render as nothing at all.
+    const campaign = await createCampaign({ listId: list._id });
+    const result = await updateCampaignDraft({
+      campaignId: campaign._id,
+      bodyMode: undefined,
+      bodyHtmlSource: '<p>x</p>',
+    });
+
+    expect(result.ok && result.campaign.bodyMode).toBe('rich');
+  });
+});

@@ -9,6 +9,7 @@ import { logger } from '@/lib/logging';
 import { validateCampaignForSend } from '@/lib/presend';
 import { renderCampaignForSend } from '@/lib/render/campaign';
 import { resolveSegmentRecipients } from '@/lib/segments';
+import { getTemplateHtml } from '@/lib/templates';
 import type { CampaignBatchDoc, PresendCheck } from '@/lib/types';
 
 export type FreezeResult =
@@ -89,7 +90,11 @@ export async function freezeCampaign(
       return { ok: false, reason: 'no_recipients' };
     }
 
-    const rendered = await renderCampaignForSend(claimed, list);
+    // The template is frozen alongside the body for the same reason the body
+    // is: it carries merge fields and their fallbacks, and editing it mid-send
+    // would change what SES substitutes into an email already rendered.
+    const templateHtml = await getTemplateHtml(claimed.listId);
+    const rendered = await renderCampaignForSend(claimed, list, templateHtml);
 
     const batchSize = Math.max(1, Math.min(config.batchSize(), 50));
     const batches: CampaignBatchDoc[] = [];
@@ -113,8 +118,10 @@ export async function freezeCampaign(
           bodyHtml: rendered.html,
           bodyText: rendered.text,
           subject: rendered.subject,
+          ...(templateHtml ? { templateSource: templateHtml } : {}),
           'counts.recipients': recipientIds.length,
         },
+        ...(templateHtml ? {} : { $unset: { templateSource: '' } }),
       },
     );
 

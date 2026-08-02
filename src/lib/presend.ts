@@ -2,8 +2,19 @@ import type { ObjectId } from 'mongodb';
 import { campaignsCollection, listsCollection } from '@/lib/db/collections';
 import { findMergeFieldsWithoutFallback, findUnknownMergeFields } from '@/lib/merge';
 import { collectLinks, isEmptyDoc, isImageOnly, validateEditorDoc } from '@/lib/render/doc';
-import { campaignTemplateText, renderCampaignForSend } from '@/lib/render/campaign';
+import {
+  campaignBodyMode,
+  campaignTemplateText,
+  renderCampaignForSend,
+} from '@/lib/render/campaign';
+import {
+  collectHtmlLinks,
+  isEmptyHtml,
+  isImageOnlyHtml,
+  sanitizeEmailHtml,
+} from '@/lib/render/sanitize';
 import { countSegment } from '@/lib/segments';
+import { getTemplateHtml } from '@/lib/templates';
 import { getSesAdapter } from '@/lib/ses/registry';
 import type { PresendCheck, PresendResult } from '@/lib/types';
 
@@ -20,7 +31,35 @@ export type { PresendCheck, PresendResult } from '@/lib/types';
  * than the source: that way a regression in the email template that dropped the
  * unsubscribe link or the postal address is caught here, before the send, and
  * not by a regulator afterwards.
+ *
+ * Every check reads whichever body the campaign's mode selects (§6.1). A
+ * campaign that was switched to HTML still carries the editor document it used
+ * to have, and judging the send against that would be judging something nobody
+ * is going to receive.
  */
+
+/**
+ * Whether a link will still work once the email has left the building.
+ *
+ * A relative URL resolves against the mailbox provider's domain, and `href="#"`
+ * — the placeholder every half-finished template contains — goes nowhere at
+ * all. A merge placeholder is fine: it becomes a real URL per recipient.
+ *
+ * `mailto:` and `tel:` pass because they work in an inbox. They cannot occur in
+ * an editor document, where `render/doc.ts` already restricts a link mark to
+ * absolute http(s); this is about the markup an operator pastes.
+ */
+function isSendableLink(href: string): boolean {
+  const trimmed = href.trim();
+  if (trimmed.startsWith('{{')) return true;
+  try {
+    const url = new URL(trimmed);
+    return ['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol);
+  } catch {
+    return false;
+  }
+}
+
 export async function validateCampaignForSend(
   campaignId: ObjectId,
   now: Date = new Date(),
@@ -44,16 +83,37 @@ export async function validateCampaignForSend(
 
   add('subject', 'Subject line is present', campaign.subject.trim().length > 0);
 
-  const validation = validateEditorDoc(campaign.bodySource);
-  add(
-    'body_valid',
-    'Body uses only supported formatting',
-    validation.ok,
-    validation.ok ? undefined : validation.errors.slice(0, 3).join('; '),
-  );
+  // The list's *current* template, not the frozen copy: this runs before
+  // freeze, and it is the template the send is about to use.
+  const templateHtml = await getTemplateHtml(campaign.listId);
+  const htmlMode = campaignBodyMode(campaign) === 'html';
+  const bodyHtmlSource = campaign.bodyHtmlSource ?? '';
 
-  const empty = isEmptyDoc(campaign.bodySource);
-  const imageOnly = !empty && isImageOnly(campaign.bodySource);
+  if (htmlMode) {
+    // Pasted HTML is not held to the closed node set — that is the point of it.
+    // What it *is* held to is the sanitizer, and anything the sanitizer would
+    // strip is reported here so the operator learns about it before the send
+    // rather than from an email that arrived missing a piece.
+    const { removed } = sanitizeEmailHtml(bodyHtmlSource);
+    add(
+      'body_valid',
+      'Body HTML is safe to send',
+      true,
+      removed.length > 0 ? `Will be removed before sending: ${removed.join(', ')}` : undefined,
+    );
+  } else {
+    const validation = validateEditorDoc(campaign.bodySource);
+    add(
+      'body_valid',
+      'Body uses only supported formatting',
+      validation.ok,
+      validation.ok ? undefined : validation.errors.slice(0, 3).join('; '),
+    );
+  }
+
+  const empty = htmlMode ? isEmptyHtml(bodyHtmlSource) : isEmptyDoc(campaign.bodySource);
+  const imageOnly =
+    !empty && (htmlMode ? isImageOnlyHtml(bodyHtmlSource) : isImageOnly(campaign.bodySource));
   add(
     'body_non_empty',
     'Body has content and is not image-only',
@@ -69,8 +129,10 @@ export async function validateCampaignForSend(
   );
 
   // Merge fields: every non-system field must carry a fallback, or a recipient
-  // with a missing attribute receives "Hi ,".
-  const template = campaignTemplateText(campaign);
+  // with a missing attribute receives "Hi ,". The template counts — a
+  // `{{first_name}}` in the greeting line of a custom shell is no different
+  // from one in the body.
+  const template = campaignTemplateText(campaign, templateHtml);
   const withoutFallback = findMergeFieldsWithoutFallback(template);
   add(
     'merge_fallbacks',
@@ -91,20 +153,15 @@ export async function validateCampaignForSend(
 
   // Links must be absolute: a relative URL resolves against the mailbox
   // provider's domain and is simply broken.
-  const links = collectLinks(campaign.bodySource);
-  const badLinks = links.filter(({ href }) => {
-    try {
-      const url = new URL(href);
-      return url.protocol !== 'http:' && url.protocol !== 'https:';
-    } catch {
-      return true;
-    }
-  });
+  const links = htmlMode
+    ? collectHtmlLinks(bodyHtmlSource)
+    : collectLinks(campaign.bodySource).map(({ href }) => href);
+  const badLinks = links.filter((href) => !isSendableLink(href));
   add(
     'links_absolute',
     'All links are absolute and resolvable',
     badLinks.length === 0,
-    badLinks.length ? `Not absolute: ${badLinks.map((l) => l.href).join(', ')}` : undefined,
+    badLinks.length ? `Not absolute: ${badLinks.join(', ')}` : undefined,
   );
 
   // Rendering here doubles as a check that the template itself still works.
@@ -113,7 +170,7 @@ export async function validateCampaignForSend(
   let hasAddress = false;
   let renderError: string | undefined;
   try {
-    const rendered = await renderCampaignForSend(campaign, list);
+    const rendered = await renderCampaignForSend(campaign, list, templateHtml);
     renderedOk = true;
     hasUnsubscribe =
       rendered.html.includes('{{unsubscribe_url}}') &&

@@ -14,6 +14,7 @@ export interface CampaignPreviewProps {
   subscribers: PreviewSubscriber[];
   selectedSubscriberId?: string;
   onSelectSubscriber: (id: string) => void;
+  /** Exposed as `aria-busy` only — deliberately not rendered as text. */
   loading?: boolean;
   error?: string;
 }
@@ -51,7 +52,11 @@ export function CampaignPreview({
   const selectId = useId();
 
   return (
-    <section className="sm-preview" aria-label="Preview">
+    // `aria-busy` rather than a visible "updating…" line: the preview
+    // re-renders on every keystroke, so a status message that appears for a
+    // couple of hundred milliseconds and then disappears reflows the toolbar
+    // under the writer's cursor. Assistive tech still gets the busy state.
+    <section className="sm-preview" aria-label="Preview" aria-busy={loading ?? false}>
       <header className="sm-preview-bar">
         <div role="tablist" aria-label="Preview format">
           <button
@@ -110,11 +115,6 @@ export function CampaignPreview({
           )}
         </div>
 
-        {loading && (
-          <p role="status" className="muted">
-            Updating preview…
-          </p>
-        )}
       </header>
 
       {error ? (

@@ -11,6 +11,7 @@ import { logger } from '@/lib/logging';
 import { renderCampaignPreview, unsubscribeUrlFor } from '@/lib/render/campaign';
 import { getSesAdapter } from '@/lib/ses/registry';
 import { isSuppressed } from '@/lib/suppressions';
+import { getTemplateHtml } from '@/lib/templates';
 import type { CampaignDoc, EditorDoc, ListDoc, RecipientContext } from '@/lib/types';
 
 /**
@@ -477,6 +478,9 @@ export async function sendListTestEmail(input: {
   const { url } = unsubscribeUrlFor(campaign._id.toHexString(), new ObjectId().toHexString());
 
   const ses = await getSesAdapter();
+  // Rendered through the list's own template, so what lands in the inbox is
+  // what a campaign would look like rather than a generic stand-in.
+  const templateHtml = await getTemplateHtml(list._id);
   let sent = 0;
 
   for (const address of addresses) {
@@ -488,7 +492,7 @@ export async function sendListTestEmail(input: {
     };
 
     try {
-      const rendered = await renderCampaignPreview(campaign, list, ctx);
+      const rendered = await renderCampaignPreview(campaign, list, ctx, templateHtml);
       await ses.sendSimple({
         fromName: list.fromName,
         fromEmail: list.fromEmail,

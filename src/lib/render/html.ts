@@ -82,7 +82,7 @@ function stripControl(value: string): string {
  * values — an attribute escaper that skips `'` is a breakout waiting for a
  * single-quoted attribute to appear.
  */
-function escapeHtml(value: string): string {
+export function escapeHtml(value: string): string {
   return stripControl(value)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -244,6 +244,31 @@ function renderListItem(item: EditorNode): string {
       child?.type === 'paragraph' ? renderInline(child.content) : renderRichBlock(child),
     )
     .join('');
+}
+
+/**
+ * The body, as ordinary HTML for the `{{content}}` slot of a custom template
+ * (§6.2a).
+ *
+ * Deliberately *unstyled*: no inline `style` attributes, no wrapper chrome,
+ * just semantic elements. An inline style would win over the template's own CSS
+ * and quietly take typography back out of the operator's hands, which is the
+ * one thing the template page exists to give them. The default template ships
+ * the type scale as `<style>` rules and the renderer inlines them afterwards.
+ */
+export function docToContentHtml(doc: EditorDoc): string {
+  const nodes = Array.isArray(doc?.content) ? doc.content : [];
+  return nodes
+    .map((node) => {
+      // A deliberately blank paragraph is spacing, and spacing is content in an
+      // email — but an empty <p> collapses in most clients.
+      if (node?.type === 'paragraph' && renderInline(node.content).trim() === '') {
+        return '<p>&nbsp;</p>';
+      }
+      return renderRichBlock(node);
+    })
+    .filter((chunk) => chunk !== '')
+    .join('\n');
 }
 
 /* ------------------------------------------------------- top-level MJML body */

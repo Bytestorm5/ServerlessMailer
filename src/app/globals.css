@@ -500,6 +500,129 @@ textarea {
   color: var(--danger);
 }
 
+/* ------------------------------------------------------------ body modes */
+
+.sm-body-mode {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.sm-body-mode [aria-selected='true'] {
+  background: var(--bg);
+  border-color: var(--muted);
+  font-weight: 500;
+}
+
+.sm-html-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.sm-html-body label,
+.sm-template-source label {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.sm-html-body textarea,
+.sm-template-source textarea {
+  /* Monospace and tall: this is a code editor wearing a textarea. */
+  font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  min-height: 26rem;
+  resize: vertical;
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
+  tab-size: 2;
+}
+
+/* ------------------------------------------------------------- templates */
+
+.sm-template {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sm-template-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.sm-template-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+.sm-template-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 60rem) {
+  .sm-template-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.sm-template-source {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.sm-template-source textarea {
+  min-height: 34rem;
+}
+
+.sm-template-errors {
+  margin: 0;
+  padding: 0.6rem 0.6rem 0.6rem 1.6rem;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  color: var(--danger);
+  font-size: 0.875rem;
+}
+
+.sm-template-warning {
+  margin: 0;
+  padding: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.sm-template-fields ul {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.sm-template-fields li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.sm-template-fields button {
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 0.2rem 0.4rem;
+  white-space: nowrap;
+}
+
 /* ----------------------------------------------------------------- modal */
 
 .sm-modal-backdrop {

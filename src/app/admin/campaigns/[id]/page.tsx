@@ -72,6 +72,8 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
         subject: campaign.subject,
         preheader: campaign.preheader,
         bodySource: campaign.bodySource,
+        bodyMode: campaign.bodyMode ?? 'rich',
+        bodyHtmlSource: campaign.bodyHtmlSource ?? '',
         segmentQuery: campaign.segmentQuery,
       }}
       list={{

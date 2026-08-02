@@ -1,14 +1,17 @@
 import { ObjectId } from 'mongodb';
 import {
   campaignsCollection,
+  emailTemplatesCollection,
   listsCollection,
   subscribersCollection,
   suppressionsCollection,
 } from '@/lib/db/collections';
 import { ensureIndexes } from '@/lib/db/indexes';
+import { DEFAULT_TEMPLATE_HTML } from '@/lib/render/template';
 import type {
   CampaignDoc,
   EditorDoc,
+  EmailTemplateDoc,
   ListDoc,
   SubscriberDoc,
   SubscriberStatus,
@@ -57,6 +60,31 @@ export function validCampaignDoc(): EditorDoc {
       { type: 'paragraph', content: [{ type: 'text', text: '{{ unsubscribe_url }}' }] },
     ],
   };
+}
+
+/** The `html`-mode equivalent of `validCampaignDoc`: passes the pre-send gate. */
+export function validCampaignHtml(): string {
+  return [
+    '<h2>Weekly update</h2>',
+    '<p>Hello {{ first_name | default: "there" }}, here is the news.</p>',
+    '<p><a href="https://example.com/post">Read more</a></p>',
+  ].join('\n');
+}
+
+export async function createTemplate(
+  listId: ObjectId,
+  html: string = DEFAULT_TEMPLATE_HTML,
+): Promise<EmailTemplateDoc> {
+  await ensureIndexes();
+  const doc: EmailTemplateDoc = {
+    _id: new ObjectId(),
+    listId,
+    html,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  await (await emailTemplatesCollection()).insertOne(doc);
+  return doc;
 }
 
 export async function createList(overrides: Partial<ListDoc> = {}): Promise<ListDoc> {

@@ -395,6 +395,46 @@ describe('validate and preview', () => {
     );
     expect(response.status).toBe(400);
   });
+
+  it('previews an unsaved HTML body through the list template', async () => {
+    const { saveTemplate } = await import('@/lib/templates');
+    await saveTemplate(
+      list._id,
+      '<html><body><div class="shell">{{content}}</div>' +
+        '<p>{{physical_address}}</p><a href="{{unsubscribe_url}}">Out</a></body></html>',
+    );
+
+    const response = await previewPost(
+      req(`/api/admin/campaigns/${campaign._id}/preview`, {
+        method: 'POST',
+        body: JSON.stringify({
+          bodyMode: 'html',
+          bodyHtmlSource: '<table><tr><td>Pasted markup</td></tr></table>',
+        }),
+      }),
+      params(campaign._id.toHexString()),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.html).toContain('class="shell"');
+    expect(body.html).toContain('Pasted markup');
+    expect(body.text).toContain('Pasted markup');
+  });
+
+  it('ignores a body mode the renderer does not know', async () => {
+    // Storing it would render as nothing at all.
+    const response = await previewPost(
+      req(`/api/admin/campaigns/${campaign._id}/preview`, {
+        method: 'POST',
+        body: JSON.stringify({ bodyMode: 'interpretive-dance' }),
+      }),
+      params(campaign._id.toHexString()),
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).html).toContain('<html');
+  });
 });
 
 describe('subscribers, suppressions, segments and export', () => {

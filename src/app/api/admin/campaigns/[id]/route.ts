@@ -1,7 +1,7 @@
 import { badRequest, notFound, readJson, toObjectId, withAdmin } from '@/lib/api/guard';
 import { listCampaignVersions, updateCampaignDraft } from '@/lib/campaigns';
 import { campaignsCollection, listsCollection } from '@/lib/db/collections';
-import type { EditorDoc, SegmentQuery } from '@/lib/types';
+import { BODY_MODES, type BodyMode, type EditorDoc, type SegmentQuery } from '@/lib/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,6 +24,8 @@ export const GET = withAdmin<Ctx>(async (_request, ctx) => {
       subject: campaign.subject,
       preheader: campaign.preheader,
       bodySource: campaign.bodySource,
+      bodyMode: campaign.bodyMode ?? 'rich',
+      bodyHtmlSource: campaign.bodyHtmlSource ?? '',
       segmentQuery: campaign.segmentQuery,
       status: campaign.status,
       trackOpens: campaign.trackOpens,
@@ -49,6 +51,13 @@ export const GET = withAdmin<Ctx>(async (_request, ctx) => {
   });
 });
 
+/** An unrecognised mode is ignored rather than stored: it would render as nothing. */
+function readBodyMode(value: unknown): BodyMode | undefined {
+  return typeof value === 'string' && (BODY_MODES as readonly string[]).includes(value)
+    ? (value as BodyMode)
+    : undefined;
+}
+
 export const PATCH = withAdmin<Ctx>(async (request, ctx) => {
   const id = toObjectId((await ctx.params).id);
   if (!id) return badRequest('invalid campaign id');
@@ -60,6 +69,8 @@ export const PATCH = withAdmin<Ctx>(async (request, ctx) => {
     subject: typeof body.subject === 'string' ? body.subject : undefined,
     preheader: typeof body.preheader === 'string' ? body.preheader : undefined,
     bodySource: body.bodySource as EditorDoc | undefined,
+    bodyMode: readBodyMode(body.bodyMode),
+    bodyHtmlSource: typeof body.bodyHtmlSource === 'string' ? body.bodyHtmlSource : undefined,
     segmentQuery: body.segmentQuery as SegmentQuery | undefined,
     trackOpens: typeof body.trackOpens === 'boolean' ? body.trackOpens : undefined,
     trackClicks: typeof body.trackClicks === 'boolean' ? body.trackClicks : undefined,
