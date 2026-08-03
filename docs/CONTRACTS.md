@@ -161,11 +161,14 @@ and export (§4.4), not as the internal source of truth.
 
 ```ts
 export function docToPlainText(doc: EditorDoc): string;
+export function htmlToPlainText(html: string): string;
 ```
 
 Links render as `text (url)`. Headings get underlines. Lists get `- ` / `1. `.
 This is the `multipart/alternative` text part (§6.2) — never empty for a
-non-empty doc.
+non-empty doc. `htmlToPlainText` does the same job for a body the operator
+pasted as HTML (§6.2a): block elements and table cells become line breaks,
+`<a>` keeps its URL, and merge placeholders pass through untouched.
 
 ## 9. `src/lib/render/html.ts`
 
@@ -178,12 +181,86 @@ export interface EmailChrome {
 export function docToMjml(doc: EditorDoc, chrome: EmailChrome): string;
 export async function renderMjml(mjml: string): Promise<{ html: string; errors: string[] }>;
 export async function docToEmailHtml(doc: EditorDoc, chrome: EmailChrome): Promise<string>;
+/** The body as plain semantic HTML, for a template's `{{content}}` slot (§6.2a). */
+export function docToContentHtml(doc: EditorDoc): string;
+export function escapeHtml(value: string): string;
 ```
 
 `mjml` v5 is async: `(await import('mjml')).default(src)` resolves to
 `{ html, json, errors }`. CSS is inlined via `<mj-style inline="inline">`.
 All user text must be HTML-escaped. The physical address and an unsubscribe
-link appear in the footer of every rendered email.
+link appear in the footer of every rendered email. `docToContentHtml` emits no
+inline styles on purpose: an inline style outranks the template's own CSS and
+would take typography back out of the operator's hands.
+
+## 9a. `src/lib/render/sanitize.ts`
+
+```ts
+export function tokenize(html: string): HtmlToken[];
+export function serializeTokens(tokens: HtmlToken[]): string;
+export function sanitizeEmailHtml(html: string): { html: string; removed: string[] };
+export function isSafeAttributeUrl(value: string): boolean;
+export function isFullHtmlDocument(html: string): boolean;
+export function collectHtmlLinks(html: string): string[];
+export function collectHtmlImages(html: string): string[];
+export function mapHtmlLinks(html: string, fn: (href: string, index: number) => string): string;
+export function decodeHtmlEntities(value: string): string;
+export function htmlTextContent(html: string): string;
+export function isEmptyHtml(html: string): boolean;
+export function isImageOnlyHtml(html: string): boolean;
+```
+
+The counterpart to `render/doc.ts` for markup the closed node set does not
+govern (§6.2a). Where `doc.ts` rejects anything outside a closed set, this
+*keeps* everything an email is made of — tables, VML, `<style>`, MSO
+conditional comments — and removes only active content: script and embedded
+elements, `on*` handlers, unsafe URL schemes, `<base>` and `<meta http-equiv>`.
+Pure, synchronous, and never throws; merge placeholders pass through byte for
+byte. `mapHtmlLinks` rewrites only `http(s)` hrefs, so `{{unsubscribe_url}}` is
+never routed through the click redirector.
+
+## 9b. `src/lib/render/template.ts`
+
+```ts
+export const DEFAULT_TEMPLATE_HTML: string;               // kind: campaign
+export const DEFAULT_CONFIRMATION_TEMPLATE_HTML: string;  // kind: confirmation
+export function defaultTemplateHtml(kind: TemplateKind): string;
+export function isTemplateKind(value: unknown): value is TemplateKind;
+export const TEMPLATE_PLACEHOLDERS:
+  Record<TemplateKind, readonly { key: string; label: string; description: string }[]>;
+export const TEMPLATE_ONLY_PLACEHOLDERS: readonly string[];  // content, preheader, confirm_url
+export const MAX_TEMPLATE_LENGTH: number;
+export class TemplateRenderError extends Error {}
+export function stripTemplateOnlyPlaceholders(html: string): string;
+export function hasContentSlot(html: string): boolean;
+export function validateTemplateHtml(input: unknown, kind?: TemplateKind):
+  { ok: boolean; errors: string[]; removed: string[] };
+export interface TemplateChrome extends EmailChrome { confirmUrl?: string }
+export async function renderEmailDocument(
+  documentHtml: string, chrome: TemplateChrome, kind?: TemplateKind,
+): Promise<string>;
+export async function applyTemplate(input: {
+  templateHtml: string; contentHtml: string; chrome: TemplateChrome;
+}): Promise<string>;
+```
+
+`applyTemplate` substitutes the body into `{{content}}` and hands off to
+`renderEmailDocument`, which resolves the send-constant placeholders
+(`preheader`, `list_name`, `physical_address`), guarantees the chrome, appends
+the open pixel, sanitizes, and inlines CSS with `juice` — lazily imported, like
+`mjml`.
+
+The guarantee depends on the kind. A `campaign` resolves
+`{{unsubscribe_url}}` to whatever the chrome says — the bare SES placeholder for
+a real send, a signed URL for a preview — and appends an unsubscribe link and
+the postal address if the template omitted them. A `confirmation` resolves
+`{{confirm_url}}` to a real URL (there is no SES template on that path),
+appends the confirmation link if the template omitted it, throws when the caller
+supplied none, and adds no unsubscribe link at all. Validation enforces the same
+split: each kind requires its own placeholder and refuses the other's.
+
+`renderEmailDocument` is also called directly for a campaign body pasted as a
+whole HTML document, which earns the same guarantees a template gets.
 
 ## 10. `src/lib/render/campaign.ts`
 
@@ -192,12 +269,15 @@ export interface RenderedCampaign { subject: string; html: string; text: string 
 /** Frozen render: merge fields become bare SES placeholders, links are
  *  rewritten for click tracking when enabled. Called once, at freeze (§7.1). */
 export async function renderCampaignForSend(
-  campaign: CampaignDoc, list: ListDoc,
+  campaign: CampaignDoc, list: ListDoc, templateHtml?: string | null,
 ): Promise<RenderedCampaign>;
 /** Fully-resolved render for preview and test sends — same code path (§6.5). */
 export async function renderCampaignPreview(
-  campaign: CampaignDoc, list: ListDoc, ctx: RecipientContext,
+  campaign: CampaignDoc, list: ListDoc, ctx: RecipientContext, templateHtml?: string | null,
 ): Promise<RenderedCampaign>;
+export function campaignBodyMode(campaign: CampaignDoc): BodyMode;   // 'rich' when absent
+/** Every text that may hold a merge field. Defaults to the frozen template. */
+export function campaignTemplateText(campaign: CampaignDoc, templateHtml?: string | null): string;
 /** Per-recipient replacement data for SES (§7.4). */
 export function buildReplacements(
   campaign: CampaignDoc, list: ListDoc, subscriber: SubscriberDoc,
@@ -206,6 +286,14 @@ export function buildRecipientHeaders(
   campaign: CampaignDoc, list: ListDoc, subscriber: SubscriberDoc,
 ): Record<string, string>;  // List-Unsubscribe + List-Unsubscribe-Post (§9.1)
 ```
+
+`templateHtml` is passed in rather than fetched, because the two sides need
+different ones: everything before freeze uses the list's current template, and
+everything after it uses the copy frozen onto the campaign (§7.1). Three render
+paths, one entry point — editor JSON through MJML (no template), editor JSON
+through a template, and pasted HTML, which always renders through a template
+because a fragment is not an email. A pasted *whole document* is the email and
+only picks up the chrome guarantees.
 
 ## 11. `src/lib/presend.ts`
 
@@ -376,6 +464,7 @@ passed by calling `freezeCampaign`, evaluates circuit breakers, and reconciles.
 export async function createCampaign(input: { listId: ObjectId; subject?: string; now?: Date }): Promise<CampaignDoc>;
 export async function updateCampaignDraft(input: {
   campaignId: ObjectId; subject?: string; preheader?: string; bodySource?: EditorDoc;
+  bodyMode?: BodyMode; bodyHtmlSource?: string;
   segmentQuery?: SegmentQuery; trackOpens?: boolean; trackClicks?: boolean; now?: Date;
 }): Promise<{ ok: true; campaign: CampaignDoc } | { ok: false; reason: 'not_found' | 'immutable' | 'invalid_body'; errors?: string[] }>;
 export async function listCampaignVersions(campaignId: ObjectId, limit?: number): Promise<CampaignVersionDoc[]>;
@@ -534,6 +623,45 @@ writing nothing to `sent_log`, batches or campaign counts. It signs the
 unsubscribe link with a synthetic subscriber id and refuses a suppressed
 address.
 
+## 28c. `src/lib/email/confirmation.ts`
+
+```ts
+export function confirmationUrl(token: string): string;
+export async function buildConfirmationEmail(input: {
+  list: ListDoc; token: string;
+  templateHtml?: string | null;                 // the list's confirmation template
+  attributes?: Record<string, string>; email?: string;
+}): Promise<EmailContent>;
+```
+
+Sent immediately via SES on signup (§5.1 step 7) and by the pending-confirmation
+drain, as a single `sendSimple` — so unlike a campaign there is no SES template
+doing per-recipient substitution, and every merge field is resolved before
+rendering. With no `templateHtml` it returns the built-in plain email; with one
+it renders through `renderEmailDocument` at kind `confirmation` and derives the
+plain-text part from the rendered HTML. The subject is app-owned either way.
+
+## 28b. `src/lib/templates.ts`
+
+```ts
+export async function getTemplate(listId: ObjectId, kind?: TemplateKind): Promise<EmailTemplateDoc | null>;
+export async function getTemplateHtml(listId: ObjectId, kind?: TemplateKind): Promise<string | null>;
+export async function saveTemplate(listId: ObjectId, kind: TemplateKind, html: unknown, now?: Date):
+  Promise<{ ok: boolean; errors: string[]; removed: string[]; template?: EmailTemplateDoc }>;
+export async function deleteTemplate(listId: ObjectId, kind?: TemplateKind): Promise<boolean>;
+export async function renderTemplatePreview(listId: ObjectId, kind: TemplateKind, html: unknown):
+  Promise<{ ok: boolean; errors: string[]; removed: string[]; html: string }>;
+export async function templateSummaries(): Promise<TemplateSummary[]>;   // every list × every kind
+```
+
+One template per list per kind, enforced by a unique index on
+`{listId, kind}`. `getTemplateHtml` returning `null` is what "this email uses
+the built-in layout" means, and it is decided in exactly one place. A template
+is stored only if `validateTemplateHtml` passes for its kind; sanitizer removals
+are reported but do not block a save, because the output is already safe and a
+hard block on a stray `<script>` teaches people to fight the editor.
+`deleteTemplate` is the way back, and it cannot change an email already frozen.
+
 ## 29. API routes — `src/app/api/**`
 
 Every route is a Next.js App Router route handler exporting `GET`/`POST`.
@@ -553,6 +681,8 @@ Handlers are thin: parse, delegate to a lib function, shape the response.
 | `/api/admin/lists` | GET, POST | §3.1 list configuration. POST returns 201. |
 | `/api/admin/lists/[id]` | GET, PATCH, DELETE | PATCH is partial. DELETE returns 409 for a list in use. |
 | `/api/admin/lists/[id]/test` | POST | §6.5 test send from the list identity, no campaign. |
+| `/api/admin/templates/[listId]/[kind]` | GET, PUT, DELETE | §6.2a. `kind` is `campaign` or `confirmation`. GET falls back to the default; DELETE reverts to the built-in layout. |
+| `/api/admin/templates/[listId]/[kind]/preview` | POST | §6.2a. Renders an unsaved template against sample data; 422 when it does not render. |
 | `/api/admin/**` | * | Session-authenticated; all campaign/subscriber writes. |
 
 All admin routes must return 401 without a valid session. The subscribe,
@@ -565,4 +695,10 @@ restricted to the §6.1 node set. Autosave on debounce with a visible saved-stat
 indicator and version history. Side-by-side preview with desktop/mobile toggle,
 a real-subscriber merge-data selector, and a plain-text tab. Send confirmation
 modal restating recipient count, list name, from, reply-to and subject, with
-typed confirmation above `config.typedConfirmationThreshold()`.
+typed confirmation above `config.typedConfirmationThreshold()`. A Rich text /
+HTML toggle on the composition screen swaps the editor for a paste box without
+discarding either source (§6.1). `/admin/templates` is the template editor:
+a list picker and a Campaign / Confirmation tab pair, HTML source on the left,
+live server-rendered preview in a sandboxed iframe on the right, a per-kind
+placeholder reference that inserts at the cursor, and one button back to the
+built-in layout (§6.2a).

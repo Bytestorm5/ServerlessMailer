@@ -2,6 +2,7 @@ import {
   campaignBatchesCollection,
   campaignVersionsCollection,
   campaignsCollection,
+  emailTemplatesCollection,
   eventsCollection,
   importAttestationsCollection,
   rateLimitsCollection,
@@ -27,6 +28,7 @@ export async function ensureIndexes(): Promise<void> {
     sentLog,
     events,
     versions,
+    templates,
     rateLimits,
     seeds,
     attestations,
@@ -38,6 +40,7 @@ export async function ensureIndexes(): Promise<void> {
     sentLogCollection(),
     eventsCollection(),
     campaignVersionsCollection(),
+    emailTemplatesCollection(),
     rateLimitsCollection(),
     seedAddressesCollection(),
     importAttestationsCollection(),
@@ -82,6 +85,13 @@ export async function ensureIndexes(): Promise<void> {
 
     versions.createIndex({ campaignId: 1, createdAt: -1 }, { name: 'campaignId_createdAt' }),
 
+    // One template per list *per kind*, enforced by the database rather than by
+    // the upsert: two campaign templates for one list is an ambiguous render.
+    templates.createIndex(
+      { listId: 1, kind: 1 },
+      { unique: true, name: 'listId_kind_unique' },
+    ),
+
     // Mongo's TTL monitor reaps expired rate-limit windows.
     rateLimits.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: 'ttl' }),
 
@@ -89,4 +99,21 @@ export async function ensureIndexes(): Promise<void> {
 
     attestations.createIndex({ listId: 1, attestedAt: -1 }, { name: 'listId_attestedAt' }),
   ]);
+
+  // Templates were briefly unique on `listId` alone, which would refuse a list
+  // its second kind. `createIndex` cannot redefine an index, so the superseded
+  // one is dropped rather than left to block every confirmation template.
+  await dropIndexIfPresent(templates, 'listId_unique');
+}
+
+/** `dropIndex` throws when the index is absent, which is the normal case. */
+async function dropIndexIfPresent(
+  collection: { dropIndex(name: string): Promise<unknown> },
+  name: string,
+): Promise<void> {
+  try {
+    await collection.dropIndex(name);
+  } catch {
+    // Not there. Nothing to do.
+  }
 }

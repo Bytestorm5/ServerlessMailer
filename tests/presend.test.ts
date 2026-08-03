@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ObjectId } from 'mongodb';
 import { validateCampaignForSend } from '@/lib/presend';
-import { campaignsCollection, listsCollection, subscribersCollection } from '@/lib/db/collections';
+import { saveTemplate } from '@/lib/templates';
+import {
+  campaignsCollection,
+  emailTemplatesCollection,
+  listsCollection,
+  subscribersCollection,
+} from '@/lib/db/collections';
 import { ensureIndexes } from '@/lib/db/indexes';
 import { resetSesAdapter, setSesAdapter } from '@/lib/ses/registry';
 import { createCampaign, createList, createSubscriber, validCampaignDoc } from '@tests/helpers/factories';
@@ -17,6 +23,7 @@ beforeEach(async () => {
     (await campaignsCollection()).deleteMany({}),
     (await subscribersCollection()).deleteMany({}),
     (await listsCollection()).deleteMany({}),
+    (await emailTemplatesCollection()).deleteMany({}),
   ]);
   list = await createList();
   ses = new FakeSes();
@@ -36,6 +43,20 @@ async function gate(overrides: Partial<CampaignDoc> = {}) {
     ...overrides,
   });
   return validateCampaignForSend(campaign._id);
+}
+
+/** Writes a template straight to the collection, bypassing the save validator. */
+async function storeTemplate(html: string) {
+  const templates = await emailTemplatesCollection();
+  await templates.deleteMany({ listId: list._id });
+  await templates.insertOne({
+    _id: new ObjectId(),
+    listId: list._id,
+    kind: 'campaign',
+    html,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
 }
 
 function checkFor(result: Awaited<ReturnType<typeof validateCampaignForSend>>, id: string) {
@@ -274,5 +295,114 @@ describe('the gate offers no way through', () => {
     // §6.6: hard block, no override. The signature is (campaignId, now?) and
     // nothing else, so there is no bypass to pass in.
     expect(validateCampaignForSend.length).toBeLessThanOrEqual(2);
+  });
+});
+
+describe('a campaign whose body is pasted HTML', () => {
+  const html = (body: string) => gate({ bodyMode: 'html', bodyHtmlSource: body });
+
+  it('passes on markup the closed node set could never express', async () => {
+    const result = await html(
+      '<table role="presentation"><tr><td style="padding:24px">' +
+        '<h2>Weekly update</h2><p>Hi {{ first_name | default: "there" }}.</p>' +
+        '<p><a href="https://example.com/post">Read more</a></p>' +
+        '</td></tr></table>',
+    );
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('judges emptiness by the HTML, not by the editor document left behind', async () => {
+    // Switching to HTML mode leaves the old rich body in place. The gate must
+    // look at what will actually be sent.
+    const result = await html('<div>&nbsp;</div>');
+
+    expect(checkFor(result, 'body_non_empty').passed).toBe(false);
+    expect(checkFor(result, 'body_non_empty').detail).toContain('empty');
+  });
+
+  it('blocks an image-only body', async () => {
+    const result = await html('<img src="https://example.com/a.png" alt="the whole email" />');
+
+    expect(checkFor(result, 'body_non_empty').passed).toBe(false);
+    expect(checkFor(result, 'body_non_empty').detail).toContain('spam signal');
+  });
+
+  it('blocks a relative link, which resolves against the mailbox provider', async () => {
+    const result = await html('<p><a href="/blog/post">Read more</a></p>');
+
+    expect(checkFor(result, 'links_absolute').passed).toBe(false);
+    expect(checkFor(result, 'links_absolute').detail).toContain('/blog/post');
+  });
+
+  it('blocks the href="#" every half-finished template contains', async () => {
+    expect(checkFor(await html('<p><a href="#">Read more</a></p>'), 'links_absolute').passed).toBe(
+      false,
+    );
+  });
+
+  it('accepts mailto:, tel: and a merge placeholder as links', async () => {
+    const result = await html(
+      '<p>Words. <a href="mailto:hi@example.com">Mail</a>' +
+        '<a href="tel:+441234567890">Call</a>' +
+        '<a href="{{unsubscribe_url}}">Out</a></p>',
+    );
+
+    expect(checkFor(result, 'links_absolute').passed).toBe(true);
+  });
+
+  it('still demands a fallback on every merge field', async () => {
+    const result = await html('<p>Hi {{first_name}}</p>');
+
+    expect(checkFor(result, 'merge_fallbacks').passed).toBe(false);
+  });
+
+  it('warns about what the sanitizer will strip without blocking the send', async () => {
+    // The output is already safe. A hard block on a stray <script> teaches
+    // people to fight the gate rather than to fix the body.
+    const result = await html('<p>Words.</p><script>alert(1)</script>');
+
+    expect(checkFor(result, 'body_valid').passed).toBe(true);
+    expect(checkFor(result, 'body_valid').detail).toContain('<script>');
+  });
+
+  it('renders with the unsubscribe link and postal address regardless', async () => {
+    const result = await html('<p>A body with no footer of its own.</p>');
+
+    expect(checkFor(result, 'renders').passed).toBe(true);
+    expect(checkFor(result, 'unsubscribe_placeholder').passed).toBe(true);
+    expect(checkFor(result, 'physical_address_rendered').passed).toBe(true);
+  });
+});
+
+describe('a campaign rendered through a custom template', () => {
+  it('passes, and picks up the template as well as the body', async () => {
+    await saveTemplate(
+      list._id,
+      'campaign',
+      '<html><body><p>Hi {{ first_name | default: "there" }}</p>{{content}}' +
+        '<p>{{physical_address}}</p><a href="{{unsubscribe_url}}">Out</a></body></html>',
+    );
+
+    const result = await gate();
+    expect(result.passed).toBe(true);
+  });
+
+  it('blocks when the template itself uses a merge field with no fallback', async () => {
+    // Stored around the validator, as a hand-edited document would be: the
+    // gate is the backstop, not the save button.
+    await storeTemplate('<html><body><p>Hi {{first_name}}</p>{{content}}</body></html>');
+
+    const result = await gate();
+    expect(checkFor(result, 'merge_fallbacks').passed).toBe(false);
+    expect(result.passed).toBe(false);
+  });
+
+  it('blocks a template that cannot render at all', async () => {
+    await storeTemplate('<html><body><p>Nowhere to put the body.</p></body></html>');
+
+    const result = await gate();
+    expect(checkFor(result, 'renders').passed).toBe(false);
+    expect(checkFor(result, 'renders').detail).toContain('{{content}}');
   });
 });

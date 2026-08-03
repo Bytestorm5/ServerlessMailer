@@ -9,8 +9,11 @@ import { config } from '@/lib/config';
 import { logger } from '@/lib/logging';
 import { renderCampaignPreview, unsubscribeUrlFor } from '@/lib/render/campaign';
 import { validateEditorDoc } from '@/lib/render/doc';
+import { MAX_TEMPLATE_LENGTH } from '@/lib/render/template';
 import { getSesAdapter } from '@/lib/ses/registry';
+import { getTemplateHtml } from '@/lib/templates';
 import type {
+  BodyMode,
   CampaignDoc,
   CampaignVersionDoc,
   EditorDoc,
@@ -59,6 +62,7 @@ export async function createCampaign(input: {
     subject: input.subject ?? '',
     preheader: '',
     bodySource: EMPTY_DOC,
+    bodyMode: 'rich',
     status: 'draft',
     segmentQuery: {},
     trackOpens: false,
@@ -76,6 +80,8 @@ export async function updateCampaignDraft(input: {
   subject?: string;
   preheader?: string;
   bodySource?: EditorDoc;
+  bodyMode?: BodyMode;
+  bodyHtmlSource?: string;
   segmentQuery?: SegmentQuery;
   trackOpens?: boolean;
   trackClicks?: boolean;
@@ -99,15 +105,38 @@ export async function updateCampaignDraft(input: {
     if (!validation.ok) return { ok: false, reason: 'invalid_body', errors: validation.errors };
   }
 
+  if (input.bodyHtmlSource !== undefined && input.bodyHtmlSource.length > MAX_TEMPLATE_LENGTH) {
+    // Pasted HTML is not held to the closed node set — the sanitizer is what
+    // makes it safe, at render time — but it is held to a size, because this
+    // document is re-rendered on every keystroke of the live preview.
+    return {
+      ok: false,
+      reason: 'invalid_body',
+      errors: [
+        `body HTML must be ${MAX_TEMPLATE_LENGTH.toLocaleString('en-GB')} characters or fewer`,
+      ],
+    };
+  }
+
   // Snapshot the *previous* state before overwriting it, so the history is a
   // list of states the writer can actually return to.
-  if (input.bodySource || input.subject !== undefined || input.preheader !== undefined) {
+  if (
+    input.bodySource ||
+    input.bodyHtmlSource !== undefined ||
+    input.bodyMode !== undefined ||
+    input.subject !== undefined ||
+    input.preheader !== undefined
+  ) {
     const version: CampaignVersionDoc = {
       _id: new ObjectId(),
       campaignId: existing._id,
       subject: existing.subject,
       preheader: existing.preheader,
       bodySource: existing.bodySource,
+      ...(existing.bodyMode ? { bodyMode: existing.bodyMode } : {}),
+      ...(existing.bodyHtmlSource !== undefined
+        ? { bodyHtmlSource: existing.bodyHtmlSource }
+        : {}),
       createdAt: now,
     };
     const versions = await campaignVersionsCollection();
@@ -126,6 +155,8 @@ export async function updateCampaignDraft(input: {
   if (input.subject !== undefined) update.subject = input.subject;
   if (input.preheader !== undefined) update.preheader = input.preheader;
   if (input.bodySource !== undefined) update.bodySource = input.bodySource;
+  if (input.bodyMode !== undefined) update.bodyMode = input.bodyMode;
+  if (input.bodyHtmlSource !== undefined) update.bodyHtmlSource = input.bodyHtmlSource;
   if (input.segmentQuery !== undefined) update.segmentQuery = input.segmentQuery;
   if (input.trackOpens !== undefined) update.trackOpens = input.trackOpens;
   if (input.trackClicks !== undefined) update.trackClicks = input.trackClicks;
@@ -162,6 +193,11 @@ export async function restoreCampaignVersion(
     subject: version.subject,
     preheader: version.preheader,
     bodySource: version.bodySource,
+    // A version written before HTML mode existed restores as `rich`, which is
+    // what it was; restoring the mode is what makes the snapshot a state the
+    // writer can actually return to.
+    bodyMode: version.bodyMode ?? 'rich',
+    bodyHtmlSource: version.bodyHtmlSource ?? '',
     now,
   });
   return restored.ok;
@@ -269,6 +305,7 @@ export async function sendTestEmail(input: {
   );
 
   const ses = await getSesAdapter();
+  const templateHtml = await getTemplateHtml(campaign.listId, 'campaign');
   let sent = 0;
 
   for (const address of input.to) {
@@ -283,7 +320,7 @@ export async function sendTestEmail(input: {
         : undefined,
     };
 
-    const rendered = await renderCampaignPreview(campaign, list, ctx);
+    const rendered = await renderCampaignPreview(campaign, list, ctx, templateHtml);
 
     try {
       await ses.sendSimple({

@@ -7,9 +7,17 @@ import {
   toSesPlaceholders,
 } from '@/lib/merge';
 import { mapLinks } from '@/lib/render/doc';
-import { docToEmailHtml, type EmailChrome } from '@/lib/render/html';
-import { docToPlainText } from '@/lib/render/text';
+import { docToContentHtml, docToEmailHtml, type EmailChrome } from '@/lib/render/html';
+import { mapHtmlLinks, isFullHtmlDocument } from '@/lib/render/sanitize';
+import {
+  DEFAULT_TEMPLATE_HTML,
+  applyTemplate,
+  renderEmailDocument,
+  stripTemplateOnlyPlaceholders,
+} from '@/lib/render/template';
+import { docToPlainText, htmlToPlainText } from '@/lib/render/text';
 import type {
+  BodyMode,
   CampaignDoc,
   EditorDoc,
   EditorNode,
@@ -30,6 +38,19 @@ import type {
  * `renderCampaignPreview` runs the *same* code path with everything resolved.
  * That is what makes a test send a real test (§6.5): same render, same merge,
  * same headers.
+ *
+ * There are three ways a campaign can become HTML, and all three end up here:
+ *
+ *  - **Editor JSON, built-in layout.** MJML, exactly as before.
+ *  - **Editor JSON, custom template.** The body is rendered as plain semantic
+ *    HTML and dropped into the template's `{{content}}` slot (§6.2a).
+ *  - **Pasted HTML.** A fragment goes into the template slot like any other
+ *    body; a whole `<html>` document *is* the email and only picks up the
+ *    chrome guarantees.
+ *
+ * The template is passed in rather than fetched, because the two callers need
+ * different ones: everything before freeze wants the list's current template,
+ * and everything after it wants the copy frozen onto the campaign.
  */
 
 export interface RenderedCampaign {
@@ -53,20 +74,48 @@ function mapTextNodes(doc: EditorDoc, fn: (text: string) => string): EditorDoc {
   return { ...doc, content: (doc.content ?? []).map(walk) };
 }
 
-/** Every text fragment that may contain a merge field, including the subject. */
-export function campaignTemplateText(campaign: CampaignDoc): string {
-  return templateText(campaign);
+/** `rich` unless the campaign says otherwise — the field post-dates the schema. */
+export function campaignBodyMode(campaign: CampaignDoc): BodyMode {
+  return campaign.bodyMode === 'html' ? 'html' : 'rich';
 }
 
-function templateText(campaign: CampaignDoc): string {
+/**
+ * Every text fragment that may contain a merge field, including the subject.
+ *
+ * `templateHtml` defaults to the copy frozen onto the campaign, which is what
+ * the send pipeline wants: the fallbacks SES substitutes must be the ones that
+ * were in force when the body was rendered, not whatever the template says an
+ * hour later. Callers running *before* freeze pass the list's current template.
+ */
+export function campaignTemplateText(
+  campaign: CampaignDoc,
+  templateHtml?: string | null,
+): string {
+  return templateText(campaign, templateHtml);
+}
+
+function templateText(campaign: CampaignDoc, templateHtml?: string | null): string {
   const parts: string[] = [campaign.subject, campaign.preheader];
-  const walk = (nodes: EditorNode[] = []) => {
-    for (const node of nodes) {
-      if (typeof node.text === 'string') parts.push(node.text);
-      if (node.content) walk(node.content);
-    }
-  };
-  walk(campaign.bodySource?.content ?? []);
+
+  if (campaignBodyMode(campaign) === 'html') {
+    // Only the active mode contributes: a body left behind by a mode switch
+    // must not block a send with merge fields nobody will ever see.
+    parts.push(campaign.bodyHtmlSource ?? '');
+  } else {
+    const walk = (nodes: EditorNode[] = []) => {
+      for (const node of nodes) {
+        if (typeof node.text === 'string') parts.push(node.text);
+        if (node.content) walk(node.content);
+      }
+    };
+    walk(campaign.bodySource?.content ?? []);
+  }
+
+  const shell = templateHtml === undefined ? campaign.templateSource : templateHtml;
+  // `{{content}}` and `{{preheader}}` mean something to the template renderer
+  // and nothing to SES, so they must not reach the merge-field scanner.
+  if (shell) parts.push(stripTemplateOnlyPlaceholders(shell));
+
   return parts.join('\n');
 }
 
@@ -85,15 +134,31 @@ function openPixelUrl(campaign: CampaignDoc): string | undefined {
  */
 function applyClickTracking(doc: EditorDoc, campaign: CampaignDoc): EditorDoc {
   if (!campaign.trackClicks) return doc;
+  return mapLinks(doc, trackedUrl(campaign));
+}
+
+/**
+ * The same rewrite for a pasted HTML body.
+ *
+ * Only the *body* is rewritten, never the template around it: routing the
+ * footer's `{{unsubscribe_url}}` through the click redirector would break
+ * one-click unsubscribe, which is the one link that must not move.
+ */
+function applyHtmlClickTracking(html: string, campaign: CampaignDoc): string {
+  if (!campaign.trackClicks) return html;
+  return mapHtmlLinks(html, trackedUrl(campaign));
+}
+
+function trackedUrl(campaign: CampaignDoc): (href: string, index: number) => string {
   const base = config.appBaseUrl();
-  return mapLinks(doc, (href, index) => {
+  return (href, index) => {
     const token = buildClickToken({
       campaignId: campaign._id.toHexString(),
       linkIndex: index,
       url: href,
     });
     return `${base}/api/t/c/${token}?r=${RECIPIENT_TOKEN_PLACEHOLDER}`;
-  });
+  };
 }
 
 function chromeFor(campaign: CampaignDoc, list: ListDoc): EmailChrome {
@@ -117,27 +182,70 @@ function textWithChrome(body: string, list: ListDoc, unsubscribe: string): strin
   ].join('\n');
 }
 
+/**
+ * Turns a tracked body into the finished email HTML, whichever way it was
+ * written.
+ *
+ * A pasted HTML body always renders through *a* template, because a fragment
+ * with no `<html>` around it is not an email; when the list has none configured
+ * the built-in default is used. Editor JSON keeps the MJML layout unless the
+ * list has a template, so switching a list to a template is opt-in and
+ * reversible.
+ */
+async function renderBodyHtml(
+  chrome: EmailChrome,
+  templateHtml: string | null | undefined,
+  body: { doc: EditorDoc } | { html: string },
+): Promise<string> {
+  if ('html' in body) {
+    // A whole document is the email. It still picks up the postal address,
+    // the unsubscribe link and the open pixel — those are not negotiable.
+    if (isFullHtmlDocument(body.html)) return renderEmailDocument(body.html, chrome);
+    return applyTemplate({
+      templateHtml: templateHtml || DEFAULT_TEMPLATE_HTML,
+      contentHtml: body.html,
+      chrome,
+    });
+  }
+
+  if (templateHtml) {
+    return applyTemplate({
+      templateHtml,
+      contentHtml: docToContentHtml(body.doc),
+      chrome,
+    });
+  }
+  return docToEmailHtml(body.doc, chrome);
+}
+
 export async function renderCampaignForSend(
   campaign: CampaignDoc,
   list: ListDoc,
+  templateHtml?: string | null,
 ): Promise<RenderedCampaign> {
+  const chrome = chromeFor(campaign, list);
+  const subject = toSesPlaceholders(campaign.subject);
+
+  if (campaignBodyMode(campaign) === 'html') {
+    const withPlaceholders = toSesPlaceholders(campaign.bodyHtmlSource ?? '');
+    const tracked = applyHtmlClickTracking(withPlaceholders, campaign);
+    return {
+      subject,
+      html: await renderBodyHtml(chrome, templateHtml, { html: tracked }),
+      text: textWithChrome(htmlToPlainText(tracked), list, UNSUBSCRIBE_PLACEHOLDER),
+    };
+  }
+
   // Placeholders are reduced *before* rendering. Doing it afterwards would mean
   // the fallback's quotes had already been HTML-escaped, and the parse would
   // silently fail.
   const withPlaceholders = mapTextNodes(campaign.bodySource, toSesPlaceholders);
   const tracked = applyClickTracking(withPlaceholders, campaign);
 
-  const html = await docToEmailHtml(tracked, chromeFor(campaign, list));
-  const text = textWithChrome(
-    docToPlainText(tracked),
-    list,
-    UNSUBSCRIBE_PLACEHOLDER,
-  );
-
   return {
-    subject: toSesPlaceholders(campaign.subject),
-    html,
-    text,
+    subject,
+    html: await renderBodyHtml(chrome, templateHtml, { doc: tracked }),
+    text: textWithChrome(docToPlainText(tracked), list, UNSUBSCRIBE_PLACEHOLDER),
   };
 }
 
@@ -145,6 +253,7 @@ export async function renderCampaignPreview(
   campaign: CampaignDoc,
   list: ListDoc,
   ctx: RecipientContext,
+  templateHtml?: string | null,
 ): Promise<RenderedCampaign> {
   const data: Record<string, string> = {
     ...ctx.attributes,
@@ -157,6 +266,30 @@ export async function renderCampaignPreview(
     recipient_token: ctx.trackingToken ?? '',
   };
 
+  const chrome: EmailChrome = {
+    ...chromeFor(campaign, list),
+    unsubscribePlaceholder: ctx.unsubscribeUrl,
+    openPixelUrl: campaign.trackOpens ? ctx.openPixelUrl : undefined,
+  };
+  const resolveToken = (value: string) =>
+    value.split(RECIPIENT_TOKEN_PLACEHOLDER).join(ctx.trackingToken ?? '');
+
+  if (campaignBodyMode(campaign) === 'html') {
+    const resolvedHtml = renderMergeFields(campaign.bodyHtmlSource ?? '', data);
+    const trackedHtml = applyHtmlClickTracking(resolvedHtml, campaign);
+    const withRecipientHtml = resolveToken(trackedHtml);
+
+    const rendered = await renderBodyHtml(chrome, templateHtml, {
+      html: withRecipientHtml,
+    });
+
+    return {
+      subject: renderMergeFields(campaign.subject, data),
+      html: resolveToken(rendered),
+      text: textWithChrome(htmlToPlainText(withRecipientHtml), list, ctx.unsubscribeUrl),
+    };
+  }
+
   const resolved = mapTextNodes(campaign.bodySource, (text) =>
     renderMergeFields(text, data),
   );
@@ -164,19 +297,11 @@ export async function renderCampaignPreview(
   // Click tracking is applied to the resolved document so the preview exercises
   // the same rewriting the real send does.
   const tracked = applyClickTracking(resolved, campaign);
-  const withRecipient = mapTextNodes(tracked, (text) =>
-    text.split(RECIPIENT_TOKEN_PLACEHOLDER).join(ctx.trackingToken ?? ''),
-  );
+  const withRecipient = mapTextNodes(tracked, resolveToken);
 
-  const chrome: EmailChrome = {
-    ...chromeFor(campaign, list),
-    unsubscribePlaceholder: ctx.unsubscribeUrl,
-    openPixelUrl: campaign.trackOpens ? ctx.openPixelUrl : undefined,
-  };
-
-  const rawHtml = await docToEmailHtml(withRecipient, chrome);
+  const rawHtml = await renderBodyHtml(chrome, templateHtml, { doc: withRecipient });
   // Any link href rewritten before resolution still carries the token marker.
-  const html = rawHtml.split(RECIPIENT_TOKEN_PLACEHOLDER).join(ctx.trackingToken ?? '');
+  const html = resolveToken(rawHtml);
 
   const text = textWithChrome(
     docToPlainText(withRecipient),

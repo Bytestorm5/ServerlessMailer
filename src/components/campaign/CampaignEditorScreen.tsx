@@ -7,12 +7,15 @@ import { CampaignPreview, type PreviewSubscriber } from '@/components/campaign/C
 import { SendConfirmationModal } from '@/components/campaign/SendConfirmationModal';
 import { SegmentPicker } from '@/components/campaign/SegmentPicker';
 import { useAutosave } from '@/hooks/useAutosave';
-import type { EditorDoc, PresendResult, SegmentQuery } from '@/lib/types';
+import type { BodyMode, EditorDoc, PresendResult, SegmentQuery } from '@/lib/types';
 
 export interface CampaignDraft {
   subject: string;
   preheader: string;
   bodySource: EditorDoc;
+  /** Absent on drafts written before HTML mode existed; treated as `rich`. */
+  bodyMode?: BodyMode;
+  bodyHtmlSource?: string;
   segmentQuery?: SegmentQuery;
 }
 
@@ -148,6 +151,13 @@ export function CampaignEditorScreen(props: CampaignEditorScreenProps) {
     }
   }, [props, saveNow]);
 
+  const bodyMode: BodyMode = draft.bodyMode === 'html' ? 'html' : 'rich';
+  /** A whole document replaces the template rather than filling its slot. */
+  const pastedWholeDocument = useMemo(
+    () => /<\s*(?:!doctype\s+html|html)[\s>]/i.test(draft.bodyHtmlSource ?? ''),
+    [draft.bodyHtmlSource],
+  );
+
   const saveLabel = useMemo(() => {
     if (status === 'saved' && savedAt) {
       return `Saved at ${savedAt.toLocaleTimeString('en-GB', {
@@ -202,11 +212,58 @@ export function CampaignEditorScreen(props: CampaignEditorScreenProps) {
 
       <div className="sm-screen-body">
         <div className="sm-screen-write">
-          <NewsletterEditor
-            initialDoc={props.initialDraft.bodySource}
-            mergeFields={props.mergeFields}
-            onChange={(bodySource) => update({ bodySource })}
-          />
+          {/*
+            Two ways to write one email (§6.1). The editor is the daily surface
+            and stays the default; HTML is the escape hatch for the campaign the
+            closed node set cannot express — a design handed over as markup, or
+            a layout that needs a table. Switching keeps both sources, so
+            changing your mind costs nothing.
+          */}
+          <div role="tablist" aria-label="Body format" className="sm-body-mode">
+            {(
+              [
+                ['rich', 'Rich text'],
+                ['html', 'HTML'],
+              ] as const
+            ).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                role="tab"
+                aria-selected={bodyMode === mode}
+                onClick={() => update({ bodyMode: mode })}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {bodyMode === 'html' ? (
+            <div className="sm-html-body">
+              <label htmlFor="sm-body-html">Body HTML</label>
+              <textarea
+                id="sm-body-html"
+                spellCheck={false}
+                placeholder="Paste your HTML here…"
+                value={draft.bodyHtmlSource ?? ''}
+                onChange={(event) => update({ bodyHtmlSource: event.target.value })}
+              />
+              <p className="muted">
+                {pastedWholeDocument
+                  ? 'A whole document — this is the email. The list template is not applied, but the postal address, unsubscribe link and open pixel still are.'
+                  : 'A fragment — this goes into the list template’s {{content}} slot. Paste a full <html> document to bypass the template entirely.'}
+              </p>
+            </div>
+          ) : (
+            <NewsletterEditor
+              // The current draft, not the initial one: switching to HTML and
+              // back remounts the editor, and it must come back to what the
+              // writer last had rather than to what they opened.
+              initialDoc={draft.bodySource}
+              mergeFields={props.mergeFields}
+              onChange={(bodySource) => update({ bodySource })}
+            />
+          )}
 
           <section className="sm-test-send" aria-label="Test send">
             <label htmlFor="sm-test-address">Send a test to</label>

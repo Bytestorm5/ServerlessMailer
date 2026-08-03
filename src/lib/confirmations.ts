@@ -5,6 +5,7 @@ import { logger } from '@/lib/logging';
 import { getSesAdapter } from '@/lib/ses/registry';
 import { setConfirmToken } from '@/lib/subscribers';
 import { filterSuppressed } from '@/lib/suppressions';
+import { getTemplateHtml } from '@/lib/templates';
 import type { ListDoc } from '@/lib/types';
 
 /**
@@ -50,6 +51,16 @@ export async function sendPendingConfirmations(
   );
 
   const ses = await getSesAdapter();
+  // One lookup per list rather than one per subscriber: a drain of 50 rows
+  // spans at most two lists.
+  const confirmationTemplates = new Map<string, string | null>(
+    await Promise.all(
+      [...listIds.values()].map(
+        async (id) =>
+          [id.toHexString(), await getTemplateHtml(id, 'confirmation')] as [string, string | null],
+      ),
+    ),
+  );
 
   for (const subscriber of pending) {
     if (suppressed.has(subscriber.email)) {
@@ -85,7 +96,13 @@ export async function sendPendingConfirmations(
         replyTo: list.replyTo,
         to: subscriber.email,
         configurationSet: list.sesConfigurationSet,
-        content: buildConfirmationEmail(list, token),
+        content: await buildConfirmationEmail({
+          list,
+          token,
+          templateHtml: confirmationTemplates.get(list._id.toHexString()) ?? null,
+          attributes: subscriber.attributes,
+          email: subscriber.email,
+        }),
       });
       result.sent += 1;
     } catch (err) {

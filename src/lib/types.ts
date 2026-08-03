@@ -123,14 +123,35 @@ export interface CampaignCounts {
   clicked: number;
 }
 
+/**
+ * How a campaign body is authored (§6.1).
+ *
+ * `rich` is the editor's document JSON. `html` is markup the operator pasted in
+ * whole, for the campaign the closed node set cannot express.
+ */
+export const BODY_MODES = ['rich', 'html'] as const;
+export type BodyMode = (typeof BODY_MODES)[number];
+
 /** Spec §3.4. */
 export interface CampaignDoc {
   _id: ObjectId;
   listId: ObjectId;
   subject: string;
   preheader: string;
-  /** Editor JSON — the source of truth. HTML is a render target. */
+  /** Editor JSON — the source of truth in `rich` mode. HTML is a render target. */
   bodySource: EditorDoc;
+  /** Absent on campaigns written before HTML mode existed; treated as `rich`. */
+  bodyMode?: BodyMode;
+  /** The pasted markup — the source of truth in `html` mode. */
+  bodyHtmlSource?: string;
+  /**
+   * The list's template as it was at freeze time.
+   *
+   * Frozen alongside the body for the same reason the body is: it is where the
+   * merge fields and their fallbacks live, and editing the template mid-send
+   * would otherwise change what SES substitutes into an already-frozen email.
+   */
+  templateSource?: string;
   /** Rendered at send-freeze time, immutable thereafter. */
   bodyHtml?: string;
   /** Plain-text alternative, auto-generated. */
@@ -215,7 +236,37 @@ export interface CampaignVersionDoc {
   subject: string;
   preheader: string;
   bodySource: EditorDoc;
+  bodyMode?: BodyMode;
+  bodyHtmlSource?: string;
   createdAt: Date;
+}
+
+/* -------------------------------------------------------- email_templates */
+
+/**
+ * The two emails a list sends that are worth designing (§6.2a).
+ *
+ * `campaign` is the newsletter shell — the whole email minus the body, with a
+ * `{{content}}` slot where the campaign lands. `confirmation` is the double
+ * opt-in email (§5.4), which has no body to slot in: it is a complete email
+ * whose one job is to get `{{confirm_url}}` clicked.
+ */
+export const TEMPLATE_KINDS = ['campaign', 'confirmation'] as const;
+export type TemplateKind = (typeof TEMPLATE_KINDS)[number];
+
+/**
+ * One hand-authored HTML template per list, per kind (§6.2a).
+ *
+ * A list with no template document for a kind renders that email through the
+ * built-in layout instead, which is what every list starts with.
+ */
+export interface EmailTemplateDoc {
+  _id: ObjectId;
+  listId: ObjectId;
+  kind: TemplateKind;
+  html: string;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 /* ------------------------------------------------------------ rate limits */

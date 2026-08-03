@@ -151,3 +151,114 @@ real person.
 It refuses a suppressed address. A test send is a real send with real
 reputation cost, and §1.2 admits no bypass — the campaign-scoped
 `sendTestEmail` predates this module and does not yet make the same check.
+
+### Templates are opt-in per list, not a replacement for MJML
+
+§6.2 says not to hand-author table-based email HTML, and for the *generated*
+layout that still stands. But a newsletter is a piece of design, and a generated
+layout can only ever be the layout its generator knows about. §6.2a adds a
+hand-authored template per list; the question was whether it should replace the
+built-in one everywhere.
+
+**It does not.** A list with no stored template renders exactly as before, so
+adopting a template is a decision an operator makes per list and can undo with
+one button, and no campaign changes appearance because the feature shipped. The
+template page opens pre-filled with the branded default, so the starting point
+is a real design rather than an empty box — one click stores it and the list is
+switched over.
+
+The one place a template is unavoidable is a **pasted HTML fragment**: MJML
+cannot host arbitrary markup, and a fragment with no document around it is not
+an email. Those render through the stored template, or through the built-in
+default when the list has not chosen one.
+
+### The HTML sanitizer keeps almost everything
+
+`render/doc.ts` rejects anything outside a closed node set, and that is right
+for editor JSON: an unknown node is content the renderer has no template for.
+Applying the same stance to hand-authored HTML would defeat the point of it —
+tables, VML, `<style>`, MSO conditional comments and presentational attributes
+are what an email is actually made of.
+
+So `render/sanitize.ts` inverts the default: keep everything, remove only what
+is actively dangerous — script and embedded elements, `on*` handlers, unsafe URL
+schemes, `<base>`, `<meta http-equiv>`. It is a hand-written tokenizer rather
+than a sanitizer library for the same reason `merge.ts` and `markdown.ts` are
+hand-written: the parser has to be the same shape as the contract. A
+general-purpose sanitizer's allowlist has no room for `<v:roundrect>`, and its
+attribute filter would not know that `{{ first_name | default: "there" }}` in a
+`title=` must survive byte for byte into a frozen SES template.
+
+Removals are **warnings, not errors**. They do not block a save and they do not
+block the §6.6 gate. The output is already safe by the time anything sees it, so
+a hard block would buy no safety and would only teach people to route around the
+gate — which is the failure mode §6.6 itself warns about.
+
+### The template is frozen onto the campaign
+
+§7.1 freezes the rendered body so a template change mid-send cannot produce two
+different emails. That was not quite enough once templates existed: SES
+substitutes merge values per recipient, batch by batch, for as long as the send
+runs, and `buildReplacements` derives those values — and their fallbacks — from
+the template *source*, not from the frozen HTML, because the frozen HTML has
+already been reduced to bare `{{placeholder}}` markers with the fallbacks
+stripped out.
+
+So `freezeCampaign` stores `campaign.templateSource` alongside `bodyHtml`. The
+send pipeline reads the frozen copy and never the live one, which needed no
+change to `processBatch` at all: `campaignTemplateText` simply defaults to it.
+
+### The preview no longer announces that it is re-rendering
+
+The campaign preview re-renders on every keystroke, and a `<p>Updating…</p>`
+that appeared and vanished a few hundred milliseconds later reflowed the toolbar
+underneath the writer's cursor. §6 says this is a writing tool; a writing tool
+that twitches is not one.
+
+The state is now `aria-busy` on the preview region — no layout, no reflow, and
+assistive technology still learns that the panel is stale.
+
+### The confirmation email is a template kind, not a second system
+
+Putting the double opt-in email (§5.4) under the same editor as the newsletter
+raised one real question: is it a *shell* with a slot, like a campaign template,
+or is it the whole email?
+
+**The whole email.** A campaign has a body written elsewhere, so its template
+needs `{{content}}`; a confirmation email's copy — the greeting, the sentence
+explaining why it arrived, the "if you didn't subscribe, ignore this" line — *is*
+the design. Splitting that into app-owned copy and an operator-owned wrapper
+would leave the operator unable to change the one paragraph most worth changing.
+
+So `EmailTemplateDoc` gained a `kind`, the unique index moved to
+`{listId, kind}`, and validation became kind-aware: a campaign template must
+have `{{content}}` and must not use `{{confirm_url}}`; a confirmation template
+must have `{{confirm_url}}` and must not use `{{unsubscribe_url}}`. That last
+rule is not pedantry — an unsubscribe link in a confirmation email offers to
+remove a subscription that does not exist yet, and the one-click endpoint would
+have nothing to act on.
+
+Two things stay app-owned. The **subject** is still
+`Confirm your subscription to <list>`, because it is the line that makes the
+email recognisable in an inbox and nothing about a template says it should
+change. The **confirmation link** is guaranteed into the output exactly the way
+the unsubscribe link is guaranteed into a campaign: a template that forgets it
+gets one appended rather than sending a dead email.
+
+The plain-text part is now derived from the rendered HTML rather than written
+alongside it. A separately-authored text part is a text part that goes stale the
+first time somebody edits the design.
+
+### Both default templates were rebuilt around one design
+
+The defaults are what most lists will actually send, so they are not
+placeholders. Both now share a cream page, a rounded paper card held to 600px by
+an MSO-only table — Word ignores `max-width`, so a fixed 600 would still be 600
+on a phone — a serif wordmark, and a sign-off outside the card. The confirmation
+default adds a bulletproof button: a background-coloured table cell for clients
+that drop CSS on anchors, with a VML shape behind it for Outlook, which drops
+`border-radius` and padding.
+
+The wordmark is **text, not an image**. A default that points at a logo URL
+nobody has uploaded renders as a broken-image icon in every inbox; the commented
+`<img>` beside it is the two-line swap for operators who have one.

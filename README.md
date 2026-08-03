@@ -21,8 +21,8 @@ including answers to the spec's open questions, are in
 | Database | MongoDB Atlas |
 | Delivery | AWS SES v2 |
 | Feedback | SES → SNS → signed HTTPS webhook |
-| Editor | Tiptap |
-| Email HTML | MJML with inlined CSS |
+| Editor | Tiptap, or pasted HTML |
+| Email HTML | MJML, or a hand-authored template, with inlined CSS |
 
 ## The design in one paragraph
 
@@ -47,6 +47,31 @@ A fresh deployment has no lists, and nothing can be sent until one exists.
 Create one at `/admin/lists` — it holds the verified SES sending domain, the
 From and Reply-To addresses, the legally required physical address and the SES
 configuration set that every campaign on that list inherits.
+
+## Writing
+
+The editor is the daily surface: headings, bold/italic, links, lists,
+blockquotes, images and rules, autosaved with version history, next to a live
+preview rendered against a real subscriber's merge data.
+
+Two escape hatches sit behind it, for the campaign that needs more than the
+editor can say:
+
+- **`/admin/templates`** is a hand-authored HTML document per list, for each of
+  the two emails a list sends. The **campaign** template is the newsletter
+  shell, with `{{content}}` where the body lands; the **confirmation** template
+  is the whole double opt-in email, built around `{{confirm_url}}`. Write
+  whatever an email client understands — tables, media queries, MSO conditional
+  comments, VML — and the renderer inlines your CSS before sending, because
+  Gmail drops `<style>`. An email with no template keeps the built-in layout,
+  and one button puts it back.
+- **The HTML tab** on a campaign takes markup pasted in whole. A fragment fills
+  the template's `{{content}}` slot; a full `<html>` document *is* the email.
+
+Neither is a way around the rules. Active content is stripped; the postal
+address and unsubscribe link are appended if a campaign template omits them, as
+is the confirmation link if a confirmation template does; merge fields still
+need fallbacks; and the §6.6 pre-send gate is the same hard block it always was.
 
 Run the test suite (an in-memory MongoDB is started automatically):
 

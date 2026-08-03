@@ -94,9 +94,16 @@ describe('CampaignPreview — merge data', () => {
 });
 
 describe('CampaignPreview — states', () => {
-  it('shows a busy state while re-rendering', () => {
+  it('signals a re-render with aria-busy and no visible text', () => {
+    // A visible "updating…" line appeared and vanished on every keystroke,
+    // reflowing the toolbar under the writer's cursor.
     setup({ loading: true });
-    expect(screen.getByRole('status')).toHaveTextContent(/updating|rendering/i);
+
+    expect(screen.getByRole('region', { name: /preview/i })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    expect(screen.queryByText(/updating|rendering/i)).toBeNull();
   });
 
   it('surfaces a render failure instead of showing a stale preview', () => {

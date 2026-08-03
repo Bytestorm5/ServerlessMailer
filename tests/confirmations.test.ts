@@ -3,7 +3,11 @@ import { sendPendingConfirmations } from '@/lib/confirmations';
 import { importSubscribers } from '@/lib/csv/import';
 import { hashConfirmToken } from '@/lib/crypto/tokens';
 import { confirmSubscriber } from '@/lib/subscribers';
-import { listsCollection, subscribersCollection } from '@/lib/db/collections';
+import {
+  emailTemplatesCollection,
+  listsCollection,
+  subscribersCollection,
+} from '@/lib/db/collections';
 import { ensureIndexes } from '@/lib/db/indexes';
 import { runSendCycle } from '@/lib/pipeline/run';
 import { resetSesAdapter, setSesAdapter } from '@/lib/ses/registry';
@@ -19,6 +23,7 @@ beforeEach(async () => {
   await Promise.all([
     (await subscribersCollection()).deleteMany({}),
     (await listsCollection()).deleteMany({}),
+    (await emailTemplatesCollection()).deleteMany({}),
   ]);
   list = await createList();
   ses = new FakeSes();
@@ -200,5 +205,57 @@ describe('the suppression list is checked here too', () => {
     // Not retried on the next tick.
     expect((await sendPendingConfirmations()).sent).toBe(0);
     expect((await reload('blocked@example.com'))?.status).toBe('pending');
+  });
+});
+
+describe('sendPendingConfirmations through a confirmation template', () => {
+  const TEMPLATE =
+    '<!doctype html><html><body><p>Salaam {{ first_name | default: "friend" }}, ' +
+    'confirm for {{list_name}}.</p><a href="{{confirm_url}}">CONFIRM</a></body></html>';
+
+  it('sends the operator’s design instead of the built-in email', async () => {
+    const { saveTemplate } = await import('@/lib/templates');
+    await saveTemplate(list._id, 'confirmation', TEMPLATE);
+    await createSubscriber(list._id, {
+      email: 'waiting@example.com',
+      status: 'pending',
+      attributes: { first_name: 'Ada' },
+    });
+
+    await sendPendingConfirmations();
+
+    const sent = ses.simpleSends[0].content;
+    expect(sent.html).toContain('Salaam Ada, confirm for Domain A Weekly.');
+    expect(sent.html).not.toContain('Please confirm you want to receive');
+  });
+
+  it('sends a working link, with the token resolved rather than left as a placeholder', async () => {
+    const { saveTemplate } = await import('@/lib/templates');
+    await saveTemplate(list._id, 'confirmation', TEMPLATE);
+    const subscriber = await createSubscriber(list._id, {
+      email: 'waiting@example.com',
+      status: 'pending',
+    });
+
+    await sendPendingConfirmations();
+
+    const token = ses.simpleSends[0].content.html.match(/token=([^"&]+)/)![1];
+    expect(await reload('waiting@example.com')).toMatchObject({
+      confirmTokenHash: hashConfirmToken(decodeURIComponent(token)),
+    });
+
+    // And the link actually confirms the subscriber it was minted for.
+    expect(await confirmSubscriber({ token: decodeURIComponent(token) })).toMatchObject({
+      ok: true,
+      subscriber: expect.objectContaining({ _id: subscriber._id, status: 'confirmed' }),
+    });
+  });
+
+  it('leaves a list without a confirmation template on the built-in email', async () => {
+    await createSubscriber(list._id, { email: 'plain@example.com', status: 'pending' });
+
+    await sendPendingConfirmations();
+
+    expect(ses.simpleSends[0].content.html).toContain('Please confirm you want to receive');
   });
 });

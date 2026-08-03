@@ -4,6 +4,7 @@ import type {
   CampaignBatchDoc,
   CampaignDoc,
   CampaignVersionDoc,
+  EmailTemplateDoc,
   EventDoc,
   ImportAttestationDoc,
   ListDoc,
@@ -23,6 +24,7 @@ export const COLLECTION_NAMES = {
   sentLog: 'sent_log',
   events: 'events',
   campaignVersions: 'campaign_versions',
+  emailTemplates: 'email_templates',
   rateLimits: 'rate_limits',
   seedAddresses: 'seed_addresses',
   importAttestations: 'import_attestations',
@@ -58,6 +60,10 @@ export async function eventsCollection(): Promise<Collection<EventDoc>> {
 
 export async function campaignVersionsCollection(): Promise<Collection<CampaignVersionDoc>> {
   return (await getDb()).collection<CampaignVersionDoc>(COLLECTION_NAMES.campaignVersions);
+}
+
+export async function emailTemplatesCollection(): Promise<Collection<EmailTemplateDoc>> {
+  return (await getDb()).collection<EmailTemplateDoc>(COLLECTION_NAMES.emailTemplates);
 }
 
 export async function rateLimitsCollection(): Promise<Collection<RateLimitDoc>> {

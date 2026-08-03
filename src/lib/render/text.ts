@@ -21,6 +21,7 @@
 
 import type { EditorDoc, EditorNode } from '@/lib/types';
 import { MAX_DOC_DEPTH } from '@/lib/render/doc';
+import { decodeHtmlEntities, tokenize } from '@/lib/render/sanitize';
 
 /** Wide enough to read as a divider, narrow enough for a 40-column client. */
 const HORIZONTAL_RULE = '-'.repeat(32);
@@ -242,12 +243,130 @@ function trimLineEnds(text: string): string {
  */
 export function docToPlainText(doc: EditorDoc): string {
   const rendered = renderBlocks(childrenOf(doc as unknown as EditorNode), 1, false);
+  return normalise(rendered);
+}
 
-  return rendered
+function normalise(text: string): string {
+  return text
     .replace(/\r\n?/g, '\n')
     .split('\n')
     .map((line) => line.replace(/[ \t]+$/, ''))
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+/* ------------------------------------------------------------------ */
+/* the same job, from pasted HTML                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Elements that start and end a line. Table cells are here because a
+ * table-based email layout uses them as paragraphs, and running every cell
+ * together produces one unreadable wall of text.
+ */
+const BLOCK_ELEMENTS: ReadonlySet<string> = new Set([
+  'address', 'article', 'aside', 'blockquote', 'center', 'dd', 'div', 'dl', 'dt',
+  'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4',
+  'h5', 'h6', 'header', 'li', 'main', 'nav', 'ol', 'p', 'pre', 'section',
+  'table', 'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'ul',
+]);
+
+/** Elements whose text is markup, metadata or invisible, and never body copy. */
+const NON_TEXT_ELEMENTS: ReadonlySet<string> = new Set([
+  'script', 'style', 'title', 'head', 'meta', 'noscript', 'template',
+]);
+
+/**
+ * The plain-text alternative for a body the operator pasted as HTML.
+ *
+ * Same two properties as `docToPlainText`, reached from the other direction:
+ * links keep their URL, images keep their alt text and source, and merge
+ * placeholders are not touched. Everything else is thrown away — the text part
+ * is not a rendering of the layout, it is what the layout was trying to say.
+ */
+export function htmlToPlainText(html: string): string {
+  if (typeof html !== 'string' || html === '') return '';
+
+  const pieces: string[] = [];
+  /** Open `<a>` hrefs, innermost last, plus the text seen since each opened. */
+  const links: { href: string; from: number }[] = [];
+  let suppressDepth = 0;
+
+  const push = (value: string) => {
+    if (value !== '') pieces.push(value);
+  };
+
+  for (const token of tokenize(html)) {
+    if (token.kind === 'text') {
+      if (suppressDepth > 0) continue;
+      // Newlines in the source are layout, not content: only an explicit
+      // block boundary or a <br> breaks a line.
+      push(decodeHtmlEntities(token.value).replace(/\s+/g, ' '));
+      continue;
+    }
+    if (token.kind !== 'tag') continue;
+
+    const { name } = token;
+
+    if (NON_TEXT_ELEMENTS.has(name)) {
+      if (token.closing) suppressDepth = Math.max(0, suppressDepth - 1);
+      else if (!token.selfClosing) suppressDepth += 1;
+      continue;
+    }
+    if (suppressDepth > 0) continue;
+
+    if (name === 'br') {
+      push('\n');
+      continue;
+    }
+    if (name === 'hr') {
+      push(`\n${HORIZONTAL_RULE}\n`);
+      continue;
+    }
+    if (name === 'img' && !token.closing) {
+      push(imageText(token.attributes));
+      continue;
+    }
+
+    if (name === 'a') {
+      if (!token.closing) {
+        const href = attributeOf(token.attributes, 'href');
+        links.push({ href: href?.trim() ?? '', from: pieces.length });
+      } else {
+        const link = links.pop();
+        // A link whose text already *is* the URL does not need it twice.
+        if (link && link.href !== '') {
+          const label = pieces.slice(link.from).join('').trim();
+          if (label !== link.href) push(` (${link.href})`);
+        }
+      }
+      continue;
+    }
+
+    if (BLOCK_ELEMENTS.has(name)) {
+      // A list marker belongs to the item, so it is emitted on the way in.
+      push(!token.closing && name === 'li' ? '\n- ' : '\n');
+    }
+  }
+
+  return normalise(pieces.join(''));
+}
+
+function attributeOf(
+  attributes: { name: string; value: string | null }[],
+  wanted: string,
+): string | undefined {
+  for (const attribute of attributes) {
+    if (attribute.name.trim().toLowerCase() === wanted) return attribute.value ?? '';
+  }
+  return undefined;
+}
+
+function imageText(attributes: { name: string; value: string | null }[]): string {
+  const alt = (attributeOf(attributes, 'alt') ?? '').trim();
+  const src = (attributeOf(attributes, 'src') ?? '').trim();
+  // A spacer GIF or a tracking pixel has no alt text and nothing to say.
+  if (alt === '') return '';
+  return src === '' ? `[Image: ${alt}]` : `[Image: ${alt}] (${src})`;
 }

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CampaignEditorScreen } from '@/components/campaign/CampaignEditorScreen';
 import type { EditorDoc, PresendResult } from '@/lib/types';
@@ -215,5 +215,103 @@ describe('CampaignEditorScreen — test sends and history', () => {
     await user.click(screen.getByRole('button', { name: /restore/i }));
 
     expect(onRestoreVersion).toHaveBeenCalledWith('v1');
+  });
+});
+
+describe('CampaignEditorScreen — HTML body mode', () => {
+  /**
+   * Scoped: the preview panel has its own HTML / Plain text tabs, and an
+   * unscoped query for a tab named "HTML" matches both tablists.
+   */
+  const modeTab = (name: RegExp) =>
+    within(screen.getByRole('tablist', { name: /body format/i })).getByRole('tab', { name });
+
+  it('starts on the rich text editor', () => {
+    setup();
+    expect(modeTab(/rich text/i)).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByLabelText(/body html/i)).toBeNull();
+  });
+
+  it('swaps the editor for a paste box when HTML is chosen', async () => {
+    const user = userEvent.setup();
+    setup();
+
+    await user.click(modeTab(/^html$/i));
+
+    expect(screen.getByLabelText(/body html/i)).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /newsletter body/i })).toBeNull();
+  });
+
+  it('saves the pasted HTML and the mode alongside it', async () => {
+    const user = userEvent.setup();
+    const { onSave } = setup();
+
+    await user.click(modeTab(/^html$/i));
+    await user.type(screen.getByLabelText(/body html/i), '<p>Pasted</p>');
+
+    await waitFor(
+      () =>
+        expect(onSave).toHaveBeenCalledWith(
+          expect.objectContaining({ bodyMode: 'html', bodyHtmlSource: '<p>Pasted</p>' }),
+        ),
+      { timeout: 4000 },
+    );
+  });
+
+  it('previews the pasted HTML rather than the editor document', async () => {
+    const user = userEvent.setup();
+    const { onRenderPreview } = setup();
+
+    await user.click(modeTab(/^html$/i));
+    await user.type(screen.getByLabelText(/body html/i), '<p>x</p>');
+
+    await waitFor(() =>
+      expect(onRenderPreview).toHaveBeenLastCalledWith(
+        expect.objectContaining({ bodyMode: 'html', bodyHtmlSource: '<p>x</p>' }),
+        expect.anything(),
+      ),
+    );
+  });
+
+  it('says whether the paste fills the template slot or replaces the template', async () => {
+    const user = userEvent.setup();
+    setup({
+      initialDraft: {
+        subject: 'This week',
+        preheader: 'The short version',
+        bodySource: BODY,
+        bodyMode: 'html',
+        bodyHtmlSource: '<p>A fragment</p>',
+      },
+    });
+
+    expect(screen.getByText(/goes into the list template/i)).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText(/body html/i));
+    await user.type(
+      screen.getByLabelText(/body html/i),
+      '<!DOCTYPE html><html><body>whole</body></html>',
+    );
+
+    expect(await screen.findByText(/whole document/i)).toBeInTheDocument();
+  });
+
+  it('keeps both sources, so switching back costs nothing', async () => {
+    const user = userEvent.setup();
+    setup({
+      initialDraft: {
+        subject: 'This week',
+        preheader: 'The short version',
+        bodySource: BODY,
+        bodyMode: 'html',
+        bodyHtmlSource: '<p>Pasted</p>',
+      },
+    });
+
+    await user.click(modeTab(/rich text/i));
+    expect(await screen.findByText('Hello world')).toBeInTheDocument();
+
+    await user.click(modeTab(/^html$/i));
+    expect(screen.getByLabelText(/body html/i)).toHaveValue('<p>Pasted</p>');
   });
 });

@@ -4,7 +4,8 @@ import { campaignsCollection, listsCollection, subscribersCollection } from '@/l
 import { config } from '@/lib/config';
 import { renderCampaignPreview, unsubscribeUrlFor } from '@/lib/render/campaign';
 import { validateEditorDoc } from '@/lib/render/doc';
-import type { CampaignDoc, EditorDoc, RecipientContext } from '@/lib/types';
+import { getTemplateHtml } from '@/lib/templates';
+import { BODY_MODES, type BodyMode, type CampaignDoc, type EditorDoc, type RecipientContext } from '@/lib/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,11 +34,19 @@ export const POST = withAdmin<Ctx>(async (request, ctx) => {
     }
   }
 
+  const draftMode =
+    typeof body?.bodyMode === 'string' && (BODY_MODES as readonly string[]).includes(body.bodyMode)
+      ? (body.bodyMode as BodyMode)
+      : undefined;
+
   const draft: CampaignDoc = {
     ...campaign,
     subject: typeof body?.subject === 'string' ? body.subject : campaign.subject,
     preheader: typeof body?.preheader === 'string' ? body.preheader : campaign.preheader,
     bodySource: draftBody ?? campaign.bodySource,
+    bodyMode: draftMode ?? campaign.bodyMode,
+    bodyHtmlSource:
+      typeof body?.bodyHtmlSource === 'string' ? body.bodyHtmlSource : campaign.bodyHtmlSource,
   };
 
   const subscriberId =
@@ -64,7 +73,10 @@ export const POST = withAdmin<Ctx>(async (request, ctx) => {
   };
 
   try {
-    const rendered = await renderCampaignPreview(draft, list, recipient);
+    // The list's current template, so editing the template page and reloading
+    // the campaign shows the change.
+    const templateHtml = await getTemplateHtml(campaign.listId, 'campaign');
+    const rendered = await renderCampaignPreview(draft, list, recipient, templateHtml);
     return Response.json({ ok: true, ...rendered });
   } catch (err) {
     // Surfaced rather than swallowed: a body that does not render must not be
