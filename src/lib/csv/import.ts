@@ -3,6 +3,7 @@ import { importAttestationsCollection, subscribersCollection } from '@/lib/db/co
 import { parseCsv } from '@/lib/csv/parse';
 import { normalizeAndValidate } from '@/lib/email/normalize';
 import { logger } from '@/lib/logging';
+import { splitNameAttributes } from '@/lib/subscriber-name';
 import { filterSuppressed } from '@/lib/suppressions';
 import type { ImportAttestationDoc, SubscriberDoc } from '@/lib/types';
 
@@ -38,7 +39,11 @@ export interface ImportResult {
 export interface ImportMapping {
   /** CSV header holding the email address. */
   email: string;
-  /** CSV header -> subscriber attribute key. */
+  /**
+   * CSV header -> subscriber attribute key. Columns mapped to `first_name` /
+   * `last_name` are stored on the first-party `firstName`/`lastName` fields
+   * rather than in the attribute map.
+   */
   attributes?: Record<string, string>;
 }
 
@@ -96,6 +101,8 @@ export async function importSubscribers(input: {
     row: number;
     email: string;
     domain: string;
+    firstName?: string;
+    lastName?: string;
     attributes: Record<string, string>;
   }
   const candidates: Candidate[] = [];
@@ -130,15 +137,23 @@ export async function importSubscribers(input: {
     }
     seen.add(check.email);
 
-    const attributes: Record<string, string> = {};
+    const mapped: Record<string, string> = {};
     for (const column of attributeColumns) {
       const value = cells[column.index];
       if (value !== undefined && value.trim() !== '') {
-        attributes[column.key] = value.trim().slice(0, 512);
+        mapped[column.key] = value.trim().slice(0, 512);
       }
     }
+    const { firstName, lastName, attributes } = splitNameAttributes(mapped);
 
-    candidates.push({ row: rowNumber, email: check.email, domain: check.domain, attributes });
+    candidates.push({
+      row: rowNumber,
+      email: check.email,
+      domain: check.domain,
+      ...(firstName !== undefined ? { firstName } : {}),
+      ...(lastName !== undefined ? { lastName } : {}),
+      attributes,
+    });
   });
 
   const suppressed = await filterSuppressed(candidates.map((c) => c.email));
@@ -177,6 +192,8 @@ export async function importSubscribers(input: {
     for (const [key, value] of Object.entries(candidate.attributes)) {
       attributeUpdates[`attributes.${key}`] = value;
     }
+    if (candidate.firstName !== undefined) attributeUpdates.firstName = candidate.firstName;
+    if (candidate.lastName !== undefined) attributeUpdates.lastName = candidate.lastName;
 
     if (!existing) {
       const doc: SubscriberDoc = {
@@ -185,6 +202,8 @@ export async function importSubscribers(input: {
         email: candidate.email,
         emailDomain: candidate.domain,
         status: asConfirmed ? 'confirmed' : 'pending',
+        ...(candidate.firstName !== undefined ? { firstName: candidate.firstName } : {}),
+        ...(candidate.lastName !== undefined ? { lastName: candidate.lastName } : {}),
         attributes: candidate.attributes,
         source: 'import',
         createdAt: now,

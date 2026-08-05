@@ -46,6 +46,8 @@ export const GET = withAdmin<Ctx>(async (_request, ctx) => {
       id: subscriber._id.toHexString(),
       listId: subscriber.listId.toHexString(),
       email: subscriber.email,
+      firstName: subscriber.firstName ?? null,
+      lastName: subscriber.lastName ?? null,
       status: subscriber.status,
       source: subscriber.source,
       attributes: subscriber.attributes,

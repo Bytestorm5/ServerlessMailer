@@ -116,12 +116,26 @@ describe('ImportPanel — choosing a file and mapping columns', () => {
       csv: 'email,first name,city\nada@example.com,Ada,London',
     });
 
-    await user.type(screen.getByLabelText(/first name/i), 'first_name');
-    // 'city' is left blank, i.e. ignored.
+    // "first name" is an obvious name column, so it arrives pre-mapped; the
+    // operator leaves it in place. 'city' is left blank, i.e. ignored.
+    expect(screen.getByLabelText(/first name/i)).toHaveValue('first_name');
     await user.click(importButton());
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(sentBody(fetchMock).mapping.attributes).toEqual({ 'first name': 'first_name' });
+  });
+
+  it('lets the operator clear a pre-mapped name column', async () => {
+    const fetchMock = stubFetch(okResult());
+    const { user, importButton } = await setup({
+      csv: 'email,first name\nada@example.com,Ada',
+    });
+
+    await user.clear(screen.getByLabelText(/first name/i));
+    await user.click(importButton());
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(sentBody(fetchMock).mapping.attributes).toEqual({});
   });
 
   it('strips the BOM Excel puts in front of the header row', async () => {

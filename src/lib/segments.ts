@@ -60,16 +60,45 @@ export function segmentToFilter(
 
   if (query.source) filter.source = query.source;
 
+  // `first_name`/`last_name` are first-party fields; documents written before
+  // that may still hold them in `attributes`. Each name constraint becomes an
+  // $or over both locations, collected into $and so several name constraints
+  // do not clobber one another.
+  const nameField: Record<string, 'firstName' | 'lastName'> = {
+    first_name: 'firstName',
+    last_name: 'lastName',
+  };
+  const clauses: Record<string, unknown>[] = [];
+
   for (const { key, value } of query.attributeEquals ?? []) {
     assertSafeAttributeKey(key);
-    filter[`attributes.${key}`] = value;
+    const field = nameField[key];
+    if (field) {
+      clauses.push({
+        $or: [
+          { [field]: value },
+          // The legacy value only counts where no first-party value overrides it.
+          { [field]: { $in: [null, ''] }, [`attributes.${key}`]: value },
+        ],
+      });
+    } else {
+      filter[`attributes.${key}`] = value;
+    }
   }
 
   for (const key of query.attributeExists ?? []) {
     assertSafeAttributeKey(key);
     // "Exists" means usable as a merge value, so blanks do not count.
-    filter[`attributes.${key}`] = { $exists: true, $nin: [null, ''] };
+    const usable = { $exists: true, $nin: [null, ''] };
+    const field = nameField[key];
+    if (field) {
+      clauses.push({ $or: [{ [field]: usable }, { [`attributes.${key}`]: usable }] });
+    } else {
+      filter[`attributes.${key}`] = usable;
+    }
   }
+
+  if (clauses.length > 0) filter.$and = clauses;
 
   return filter as Filter<SubscriberDoc>;
 }

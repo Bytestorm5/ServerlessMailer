@@ -16,6 +16,7 @@ import {
   stripTemplateOnlyPlaceholders,
 } from '@/lib/render/template';
 import { docToPlainText, htmlToPlainText } from '@/lib/render/text';
+import { subscriberMergeData } from '@/lib/subscriber-name';
 import type {
   BodyMode,
   CampaignDoc,
@@ -344,7 +345,7 @@ export function buildReplacements(
   );
 
   const data: Record<string, string> = {
-    ...subscriber.attributes,
+    ...subscriberMergeData(subscriber),
     email: subscriber.email,
     physical_address: list.physicalAddress,
     list_name: list.name,

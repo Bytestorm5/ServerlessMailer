@@ -328,8 +328,8 @@ returns `{ created: false }`, never throws.
 
 ```ts
 export async function upsertPendingSubscriber(input: {
-  listId: ObjectId; email: string; attributes?: Record<string, string>;
-  source: SubscriberSource; now?: Date;
+  listId: ObjectId; email: string; firstName?: string; lastName?: string;
+  attributes?: Record<string, string>; source: SubscriberSource; now?: Date;
 }): Promise<{ subscriber: SubscriberDoc; created: boolean; alreadyConfirmed: boolean }>;
 
 export async function setConfirmToken(subscriberId: ObjectId, tokenHash: string, expiresAt: Date, now?: Date): Promise<void>;
@@ -356,6 +356,13 @@ export async function findSubscribers(query: {
 Consent evidence (`confirmedAt`, `confirmIp`, `confirmUserAgent`) is written
 once and never modified or cleared, including on unsubscribe (§5.3).
 Every status change appends to `history`.
+
+First and last name are first-party fields (`firstName`/`lastName` on the
+document). `upsertPendingSubscriber` routes `first_name`/`last_name` attribute
+keys into them, so no new document stores a name inside `attributes`; a legacy
+attribute value still renders when the first-party field is absent
+(`src/lib/subscriber-name.ts`). `findSubscribers.search` matches email, first
+name and last name.
 
 ## 14. `src/lib/segments.ts`
 
@@ -547,7 +554,8 @@ checked against `suppressions` and skipped on a match (a suppressed address must
 never be resurrected); idempotent on `{listId, email}` — re-import updates
 attributes and never duplicates or resets consent state; `markConfirmed` is only
 honoured when an attestation is supplied, and the attestation text is logged
-verbatim.
+verbatim. Columns mapped to `first_name`/`last_name` are stored on the
+first-party `firstName`/`lastName` fields.
 
 ## 26. `src/lib/csv/export.ts`
 

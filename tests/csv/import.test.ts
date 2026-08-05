@@ -193,7 +193,7 @@ describe('importSubscribers — idempotency', () => {
     await run('email,first_name\na@example.com,Augusta\n', { mapping });
 
     const doc = await (await subscribersCollection()).findOne({ email: 'a@example.com' });
-    expect(doc?.attributes.first_name).toBe('Augusta');
+    expect(doc?.firstName).toBe('Augusta');
     expect(await (await subscribersCollection()).countDocuments()).toBe(1);
   });
 
@@ -268,7 +268,23 @@ describe('importSubscribers — attribute mapping', () => {
 
     expect(result.imported).toBe(1);
     const doc = await (await subscribersCollection()).findOne({ email: 'a@example.com' });
-    expect(doc?.attributes).toEqual({ first_name: 'Ada' });
+    // Name columns land on the first-party fields, not in the attribute map.
+    expect(doc?.firstName).toBe('Ada');
+    expect(doc?.attributes).toEqual({});
+  });
+
+  it('stores mapped name columns first-party and the rest as attributes', async () => {
+    await run('email,fn,ln,employer\na@example.com,Ada,Lovelace,Analytical Engines\n', {
+      mapping: {
+        email: 'email',
+        attributes: { fn: 'first_name', ln: 'last_name', employer: 'company' },
+      },
+    });
+
+    const doc = await (await subscribersCollection()).findOne({ email: 'a@example.com' });
+    expect(doc?.firstName).toBe('Ada');
+    expect(doc?.lastName).toBe('Lovelace');
+    expect(doc?.attributes).toEqual({ company: 'Analytical Engines' });
   });
 
   it('ignores an attribute key that could reach outside the attributes subdocument', async () => {

@@ -100,19 +100,20 @@ export const AVAILABLE_MERGE_FIELDS: readonly MergeFieldDefinition[] = Object.fr
       {
         key: 'first_name',
         label: 'First name',
-        description: 'Subscriber attribute. Needs a fallback, e.g. "there".',
+        description: "The subscriber's first name. Needs a fallback, e.g. \"there\".",
         system: false,
       },
       {
         key: 'last_name',
         label: 'Last name',
-        description: 'Subscriber attribute. Needs a fallback.',
+        description: "The subscriber's last name. Needs a fallback.",
         system: false,
       },
       {
         key: 'full_name',
         label: 'Full name',
-        description: 'Subscriber attribute. Needs a fallback.',
+        description:
+          'First and last name together, unless set explicitly. Needs a fallback.',
         system: false,
       },
       {

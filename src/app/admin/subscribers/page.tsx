@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { listsCollection } from '@/lib/db/collections';
+import { displayName } from '@/lib/subscriber-name';
 import { findSubscribers } from '@/lib/subscribers';
 import { SUBSCRIBER_STATUSES, type SubscriberStatus } from '@/lib/types';
 import { ObjectId } from 'mongodb';
@@ -76,9 +77,9 @@ export default async function SubscribersPage({
         <input
           name="search"
           type="search"
-          placeholder="Search by email"
+          placeholder="Search by email or name"
           defaultValue={params.search ?? ''}
-          aria-label="Search by email"
+          aria-label="Search by email or name"
         />
         <button type="submit">Filter</button>
       </form>
@@ -90,6 +91,7 @@ export default async function SubscribersPage({
           <thead>
             <tr>
               <th>Email</th>
+              <th>Name</th>
               <th>Status</th>
               <th>Source</th>
               <th>Signed up</th>
@@ -104,6 +106,7 @@ export default async function SubscribersPage({
                     {subscriber.email}
                   </Link>
                 </td>
+                <td>{displayName(subscriber) ?? '—'}</td>
                 <td>
                   <span className={`sm-badge is-${subscriber.status}`}>{subscriber.status}</span>
                 </td>
@@ -114,7 +117,7 @@ export default async function SubscribersPage({
             ))}
             {items.length === 0 && (
               <tr>
-                <td colSpan={5} className="muted">
+                <td colSpan={6} className="muted">
                   Nobody matches these filters.
                 </td>
               </tr>

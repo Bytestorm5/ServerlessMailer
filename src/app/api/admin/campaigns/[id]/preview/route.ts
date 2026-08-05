@@ -4,6 +4,7 @@ import { campaignsCollection, listsCollection, subscribersCollection } from '@/l
 import { config } from '@/lib/config';
 import { renderCampaignPreview, unsubscribeUrlFor } from '@/lib/render/campaign';
 import { validateEditorDoc } from '@/lib/render/doc';
+import { subscriberMergeData } from '@/lib/subscriber-name';
 import { getTemplateHtml } from '@/lib/templates';
 import { BODY_MODES, type BodyMode, type CampaignDoc, type EditorDoc, type RecipientContext } from '@/lib/types';
 
@@ -66,7 +67,7 @@ export const POST = withAdmin<Ctx>(async (request, ctx) => {
   const recipient: RecipientContext = {
     subscriberId: previewId.toHexString(),
     email: subscriber?.email ?? 'preview@example.com',
-    attributes: subscriber?.attributes ?? {},
+    attributes: subscriber ? subscriberMergeData(subscriber) : {},
     unsubscribeUrl: url,
     trackingToken: token,
     openPixelUrl: draft.trackOpens ? `${config.appBaseUrl()}/api/t/o/${token}` : undefined,

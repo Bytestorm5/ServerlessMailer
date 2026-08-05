@@ -33,6 +33,8 @@ export const GET = withAdmin(async (request) => {
     subscribers: result.items.map((doc) => ({
       id: doc._id.toHexString(),
       email: doc.email,
+      firstName: doc.firstName ?? null,
+      lastName: doc.lastName ?? null,
       status: doc.status,
       source: doc.source,
       createdAt: doc.createdAt,

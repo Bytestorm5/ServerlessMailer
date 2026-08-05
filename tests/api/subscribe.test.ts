@@ -72,6 +72,33 @@ describe('POST /api/subscribe — happy path', () => {
     expect(ses.bulkSends).toHaveLength(0);
   });
 
+  it('stores first and last name first-party, in either spelling', async () => {
+    await subscribe({ email: 'camel@example.com', firstName: 'Ada', lastName: 'Lovelace' });
+    await subscribe(
+      { email: 'snake@example.com', first_name: 'Grace', last_name: 'Hopper' },
+      { 'x-forwarded-for': '203.0.113.6' },
+    );
+
+    const camel = await (await subscribersCollection()).findOne({ email: 'camel@example.com' });
+    expect(camel?.firstName).toBe('Ada');
+    expect(camel?.lastName).toBe('Lovelace');
+
+    const snake = await (await subscribersCollection()).findOne({ email: 'snake@example.com' });
+    expect(snake?.firstName).toBe('Grace');
+    expect(snake?.lastName).toBe('Hopper');
+  });
+
+  it('routes name keys sent inside attributes to the first-party fields', async () => {
+    await subscribe({
+      email: 'nested@example.com',
+      attributes: { first_name: 'Ada', city: 'London' },
+    });
+
+    const doc = await (await subscribersCollection()).findOne({ email: 'nested@example.com' });
+    expect(doc?.firstName).toBe('Ada');
+    expect(doc?.attributes).toEqual({ city: 'London' });
+  });
+
   it('stores only the HMAC hash of the token, with a 7-day expiry', async () => {
     await subscribe({ email: 'hashed@example.com' });
 
@@ -85,10 +112,10 @@ describe('POST /api/subscribe — happy path', () => {
   });
 
   it('captures declared attributes', async () => {
-    await subscribe({ email: 'attrs@example.com', attributes: { first_name: 'Ada' } });
+    await subscribe({ email: 'attrs@example.com', attributes: { city: 'London' } });
 
     const doc = await (await subscribersCollection()).findOne({});
-    expect(doc?.attributes).toEqual({ first_name: 'Ada' });
+    expect(doc?.attributes).toEqual({ city: 'London' });
   });
 });
 

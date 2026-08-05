@@ -97,7 +97,9 @@ listId
 email                   // normalized: lowercased, trimmed
 emailDomain             // denormalized for domain-level analysis
 status                  pending | confirmed | unsubscribed | bounced | complained
-attributes              { firstName, ... }   // merge fields
+firstName               // optional; first-party, feeds {{first_name}}
+lastName                // optional; first-party, feeds {{last_name}}
+attributes              { company, ... }     // custom merge fields
 source                  "web_form" | "import" | "api"
 
 createdAt

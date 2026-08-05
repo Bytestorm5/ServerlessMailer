@@ -111,6 +111,34 @@ describe('countSegment', () => {
     ).toBe(1);
   });
 
+  it('matches first_name against both first-party and legacy storage', async () => {
+    await createSubscriber(list._id, { email: 'first-party@example.com', firstName: 'Ada' });
+    await createSubscriber(list._id, {
+      email: 'legacy@example.com',
+      attributes: { first_name: 'Ada' },
+    });
+    // The first-party field overrides a stale legacy attribute, so this
+    // subscriber renders "Grace" and must not match a segment on "Ada".
+    await createSubscriber(list._id, {
+      email: 'overridden@example.com',
+      firstName: 'Grace',
+      attributes: { first_name: 'Ada' },
+    });
+
+    expect(
+      await countSegment(list._id, { attributeEquals: [{ key: 'first_name', value: 'Ada' }] }),
+    ).toBe(2);
+    expect(await countSegment(list._id, { attributeExists: ['first_name'] })).toBe(3);
+    expect(
+      await countSegment(list._id, {
+        attributeEquals: [
+          { key: 'first_name', value: 'Ada' },
+          { key: 'last_name', value: 'Lovelace' },
+        ],
+      }),
+    ).toBe(0);
+  });
+
   it('narrows by engagement across the last N campaigns of the list', async () => {
     const engaged = await createSubscriber(list._id, { email: 'engaged@example.com' });
     await createSubscriber(list._id, { email: 'quiet@example.com' });

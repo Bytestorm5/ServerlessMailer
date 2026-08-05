@@ -43,6 +43,14 @@ export function ImportPanel({ lists }: { lists: { id: string; name: string }[] }
     setHeaders(cells);
     const guess = cells.find((cell) => /e-?mail/i.test(cell)) ?? cells[0] ?? '';
     setEmailColumn(guess);
+
+    // Pre-map obvious name columns; the operator can still clear or change them.
+    const prefill: Record<string, string> = {};
+    const firstGuess = cells.find((cell) => /^(first[\s_-]?name|forename|given[\s_-]?name)$/i.test(cell));
+    const lastGuess = cells.find((cell) => /^(last[\s_-]?name|surname|family[\s_-]?name)$/i.test(cell));
+    if (firstGuess) prefill[firstGuess] = 'first_name';
+    if (lastGuess) prefill[lastGuess] = 'last_name';
+    setAttributeColumns(prefill);
   }
 
   if (lists.length === 0) {

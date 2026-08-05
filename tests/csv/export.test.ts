@@ -54,6 +54,34 @@ describe('exportSubscribersCsv', () => {
     expect(row.confirm_user_agent).toBe('Mozilla/5.0 (test)');
   });
 
+  it('exports first-party names, falling back to legacy attribute storage', async () => {
+    await createSubscriber(list._id, {
+      email: 'first-party@example.com',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+    });
+    await createSubscriber(list._id, {
+      email: 'legacy@example.com',
+      attributes: { first_name: 'Grace', last_name: 'Hopper' },
+    });
+
+    const { headers, rows } = parseCsv(await exportSubscribersCsv({ listId: list._id }));
+    expect(headers).toEqual(expect.arrayContaining(['first_name', 'last_name']));
+    // No duplicate columns for the legacy attribute keys.
+    expect(headers.filter((h) => h === 'first_name')).toHaveLength(1);
+
+    const byEmail = new Map(
+      rows.map((row) => [
+        row[headers.indexOf('email')],
+        Object.fromEntries(headers.map((header, i) => [header, row[i]])),
+      ]),
+    );
+    expect(byEmail.get('first-party@example.com')?.first_name).toBe('Ada');
+    expect(byEmail.get('first-party@example.com')?.last_name).toBe('Lovelace');
+    expect(byEmail.get('legacy@example.com')?.first_name).toBe('Grace');
+    expect(byEmail.get('legacy@example.com')?.last_name).toBe('Hopper');
+  });
+
   it('exports every status, not only the mailable ones', async () => {
     for (const status of ['confirmed', 'pending', 'unsubscribed', 'bounced'] as const) {
       await createSubscriber(list._id, { email: `${status}@example.com`, status });

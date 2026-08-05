@@ -4,6 +4,7 @@ import { config } from '@/lib/config';
 import { hashConfirmToken } from '@/lib/crypto/tokens';
 import { normalizeAndValidate } from '@/lib/email/normalize';
 import { logger } from '@/lib/logging';
+import { splitNameAttributes } from '@/lib/subscriber-name';
 import { addSuppression } from '@/lib/suppressions';
 import type {
   SubscriberDoc,
@@ -47,6 +48,8 @@ function historyEntry(
 export async function upsertPendingSubscriber(input: {
   listId: ObjectId;
   email: string;
+  firstName?: string;
+  lastName?: string;
   attributes?: Record<string, string>;
   source: SubscriberSource;
   now?: Date;
@@ -58,6 +61,9 @@ export async function upsertPendingSubscriber(input: {
   const collection = await subscribersCollection();
   const existing = await collection.findOne({ listId: input.listId, email: check.email });
 
+  // Names arriving under the legacy attribute keys are stored first-party too.
+  const { firstName, lastName, attributes } = splitNameAttributes(input.attributes, input);
+
   if (!existing) {
     const doc: SubscriberDoc = {
       _id: new ObjectId(),
@@ -65,7 +71,9 @@ export async function upsertPendingSubscriber(input: {
       email: check.email,
       emailDomain: check.domain,
       status: 'pending',
-      attributes: input.attributes ?? {},
+      ...(firstName !== undefined ? { firstName } : {}),
+      ...(lastName !== undefined ? { lastName } : {}),
+      attributes,
       source: input.source,
       createdAt: now,
       history: [historyEntry(null, 'pending', `signup:${input.source}`, now)],
@@ -89,9 +97,11 @@ export async function upsertPendingSubscriber(input: {
 
   // Merge attributes without dropping keys the caller did not mention.
   const attributeUpdates: Record<string, string> = {};
-  for (const [key, value] of Object.entries(input.attributes ?? {})) {
+  for (const [key, value] of Object.entries(attributes)) {
     attributeUpdates[`attributes.${key}`] = value;
   }
+  if (firstName !== undefined) attributeUpdates.firstName = firstName;
+  if (lastName !== undefined) attributeUpdates.lastName = lastName;
 
   if (existing.status === 'confirmed') {
     // Already consented. Re-submitting the form must not revoke that consent,
@@ -407,7 +417,8 @@ export async function findSubscribers(query: {
   if (query.listId) filter.listId = query.listId;
   if (query.status) filter.status = query.status;
   if (query.search) {
-    filter.email = { $regex: escapeRegExp(query.search), $options: 'i' };
+    const pattern = { $regex: escapeRegExp(query.search), $options: 'i' };
+    filter.$or = [{ email: pattern }, { firstName: pattern }, { lastName: pattern }];
   }
 
   const collection = await subscribersCollection();

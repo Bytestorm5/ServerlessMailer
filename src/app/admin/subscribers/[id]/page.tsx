@@ -6,6 +6,7 @@ import {
   sentLogCollection,
   subscribersCollection,
 } from '@/lib/db/collections';
+import { displayName } from '@/lib/subscriber-name';
 import { isSuppressed } from '@/lib/suppressions';
 
 export const dynamic = 'force-dynamic';
@@ -41,9 +42,12 @@ export default async function SubscriberDetailPage({
     .toArray();
   const suppressed = await isSuppressed(subscriber.email);
 
+  const name = displayName(subscriber);
+
   return (
     <>
       <h1 style={{ fontSize: '1.25rem' }}>{subscriber.email}</h1>
+      {name && <p style={{ margin: '0.25rem 0 0' }}>{name}</p>}
       <p>
         <span className={`sm-badge is-${subscriber.status}`}>{subscriber.status}</span>{' '}
         {suppressed && <span className="sm-badge is-bounced">suppressed</span>}

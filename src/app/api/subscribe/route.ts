@@ -9,6 +9,7 @@ import { logger } from '@/lib/logging';
 import { consumeRateLimit } from '@/lib/ratelimit';
 import { clientIp } from '@/lib/request-context';
 import { getSesAdapter } from '@/lib/ses/registry';
+import { subscriberMergeData } from '@/lib/subscriber-name';
 import { setConfirmToken, upsertPendingSubscriber } from '@/lib/subscribers';
 import { isSuppressed } from '@/lib/suppressions';
 import { getTemplateHtml } from '@/lib/templates';
@@ -57,6 +58,20 @@ async function readBody(request: Request): Promise<Record<string, unknown> | nul
   } catch {
     return null;
   }
+}
+
+/**
+ * First-party name fields. Accepted both camelCased (JSON clients) and
+ * snake_cased (plain form posts, matching the merge-field spelling); a
+ * `first_name`/`last_name` key inside `attributes` still works too and is
+ * routed to the same place by the upsert.
+ */
+function readName(body: Record<string, unknown>, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = body[key];
+    if (typeof value === 'string' && value.trim() !== '') return value.slice(0, 512);
+  }
+  return undefined;
 }
 
 function readAttributes(raw: unknown): Record<string, string> {
@@ -134,6 +149,8 @@ export async function POST(request: Request): Promise<Response> {
   const { subscriber, alreadyConfirmed } = await upsertPendingSubscriber({
     listId: list._id,
     email: check.email,
+    firstName: readName(body, 'firstName', 'first_name'),
+    lastName: readName(body, 'lastName', 'last_name'),
     attributes: readAttributes(body.attributes),
     source: 'web_form',
   });
@@ -175,7 +192,7 @@ export async function POST(request: Request): Promise<Response> {
         list,
         token,
         templateHtml: await getTemplateHtml(list._id, 'confirmation'),
-        attributes: subscriber.attributes,
+        attributes: subscriberMergeData(subscriber),
         email: check.email,
       }),
     });

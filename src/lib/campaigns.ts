@@ -8,6 +8,7 @@ import {
 import { config } from '@/lib/config';
 import { logger } from '@/lib/logging';
 import { renderCampaignPreview, unsubscribeUrlFor } from '@/lib/render/campaign';
+import { subscriberMergeData } from '@/lib/subscriber-name';
 import { validateEditorDoc } from '@/lib/render/doc';
 import { MAX_TEMPLATE_LENGTH } from '@/lib/render/template';
 import { getSesAdapter } from '@/lib/ses/registry';
@@ -312,7 +313,7 @@ export async function sendTestEmail(input: {
     const ctx: RecipientContext = {
       subscriberId: subscriberId.toHexString(),
       email: address,
-      attributes: sample?.attributes ?? {},
+      attributes: sample ? subscriberMergeData(sample) : {},
       unsubscribeUrl: url,
       trackingToken: token,
       openPixelUrl: campaign.trackOpens

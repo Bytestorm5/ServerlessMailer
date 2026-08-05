@@ -3,6 +3,7 @@ import { generateConfirmToken } from '@/lib/crypto/tokens';
 import { buildConfirmationEmail } from '@/lib/email/confirmation';
 import { logger } from '@/lib/logging';
 import { getSesAdapter } from '@/lib/ses/registry';
+import { subscriberMergeData } from '@/lib/subscriber-name';
 import { setConfirmToken } from '@/lib/subscribers';
 import { filterSuppressed } from '@/lib/suppressions';
 import { getTemplateHtml } from '@/lib/templates';
@@ -100,7 +101,7 @@ export async function sendPendingConfirmations(
           list,
           token,
           templateHtml: confirmationTemplates.get(list._id.toHexString()) ?? null,
-          attributes: subscriber.attributes,
+          attributes: subscriberMergeData(subscriber),
           email: subscriber.email,
         }),
       });

@@ -14,6 +14,8 @@ import type { SegmentQuery, SubscriberDoc, SubscriberStatus } from '@/lib/types'
 
 const BASE_HEADERS = [
   'email',
+  'first_name',
+  'last_name',
   'status',
   'source',
   'created_at',
@@ -48,13 +50,19 @@ export async function exportSubscribersCsv(input: {
   const docs = await collection.find(filter).sort({ createdAt: 1 }).toArray();
 
   // Attribute columns are the union across the export, so no data is lost.
+  // The name keys are excluded: they have dedicated first-party columns, and a
+  // legacy attribute value surfaces there instead of in a duplicate column.
   const attributeKeys = [
     ...new Set(docs.flatMap((doc) => Object.keys(doc.attributes ?? {}))),
-  ].sort();
+  ]
+    .filter((key) => key !== 'first_name' && key !== 'last_name')
+    .sort();
 
   const headers = [...BASE_HEADERS, ...attributeKeys];
   const rows = docs.map((doc) => [
     doc.email,
+    doc.firstName ?? doc.attributes?.first_name ?? '',
+    doc.lastName ?? doc.attributes?.last_name ?? '',
     doc.status,
     doc.source,
     iso(doc.createdAt),

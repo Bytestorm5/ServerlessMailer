@@ -184,6 +184,24 @@ describe('buildReplacements', () => {
     expect(missing.first_name).toBe('there');
   });
 
+  it('prefers the first-party name fields over legacy attribute values', async () => {
+    const campaign = await campaignWith();
+
+    const replacements = buildReplacements(campaign, list, {
+      ...subscriber,
+      firstName: 'Augusta',
+      attributes: { first_name: 'Ada' },
+    });
+    expect(replacements.first_name).toBe('Augusta');
+
+    const firstPartyOnly = buildReplacements(campaign, list, {
+      ...subscriber,
+      firstName: 'Augusta',
+      attributes: {},
+    });
+    expect(firstPartyOnly.first_name).toBe('Augusta');
+  });
+
   it('provides the system fields every campaign relies on', async () => {
     const campaign = await campaignWith();
     const replacements = buildReplacements(campaign, list, subscriber);

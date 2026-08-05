@@ -119,6 +119,54 @@ describe('upsertPendingSubscriber', () => {
     expect(doc?.attributes).toEqual({ firstName: 'Ada', city: 'Paris' });
   });
 
+  it('stores first and last name first-party', async () => {
+    await upsertPendingSubscriber({
+      listId: list._id,
+      email: 'named@example.com',
+      firstName: '  Ada ',
+      lastName: 'Lovelace',
+      source: 'web_form',
+    });
+
+    const doc = await (await subscribersCollection()).findOne({ email: 'named@example.com' });
+    expect(doc?.firstName).toBe('Ada');
+    expect(doc?.lastName).toBe('Lovelace');
+  });
+
+  it('routes first_name/last_name attribute keys to the first-party fields', async () => {
+    await upsertPendingSubscriber({
+      listId: list._id,
+      email: 'routed@example.com',
+      source: 'web_form',
+      attributes: { first_name: 'Ada', last_name: 'Lovelace', city: 'London' },
+    });
+
+    const doc = await (await subscribersCollection()).findOne({ email: 'routed@example.com' });
+    expect(doc?.firstName).toBe('Ada');
+    expect(doc?.lastName).toBe('Lovelace');
+    expect(doc?.attributes).toEqual({ city: 'London' });
+  });
+
+  it('updates the name on a repeat signup without touching what it was not given', async () => {
+    await upsertPendingSubscriber({
+      listId: list._id,
+      email: 'renamed@example.com',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      source: 'web_form',
+    });
+    await upsertPendingSubscriber({
+      listId: list._id,
+      email: 'renamed@example.com',
+      firstName: 'Augusta',
+      source: 'web_form',
+    });
+
+    const doc = await (await subscribersCollection()).findOne({ email: 'renamed@example.com' });
+    expect(doc?.firstName).toBe('Augusta');
+    expect(doc?.lastName).toBe('Lovelace');
+  });
+
   it('rejects an invalid address', async () => {
     await expect(
       upsertPendingSubscriber({ listId: list._id, email: 'nope', source: 'web_form' }),
@@ -451,6 +499,18 @@ describe('findSubscribers', () => {
   it('searches by email substring, treating the term literally', async () => {
     expect((await findSubscribers({ listId: list._id, search: 'searchme' })).total).toBe(1);
     expect((await findSubscribers({ listId: list._id, search: '.*' })).total).toBe(0);
+  });
+
+  it('searches by first and last name', async () => {
+    await createSubscriber(list._id, {
+      email: 'named@example.com',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+    });
+
+    expect((await findSubscribers({ listId: list._id, search: 'ada' })).total).toBe(1);
+    expect((await findSubscribers({ listId: list._id, search: 'lovelace' })).total).toBe(1);
+    expect((await findSubscribers({ listId: list._id, search: 'byron' })).total).toBe(0);
   });
 
   it('sorts by signup date in both directions', async () => {

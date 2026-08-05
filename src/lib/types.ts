@@ -47,6 +47,14 @@ export interface SubscriberDoc {
   /** Denormalized for domain-level analysis. */
   emailDomain: string;
   status: SubscriberStatus;
+  /**
+   * First-party name fields. These are the canonical source for the
+   * `first_name` / `last_name` merge fields; a `first_name`/`last_name` key in
+   * `attributes` is legacy data kept only for documents written before these
+   * fields existed.
+   */
+  firstName?: string;
+  lastName?: string;
   attributes: Record<string, string>;
   source: SubscriberSource;
 

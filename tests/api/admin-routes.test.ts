@@ -800,7 +800,9 @@ describe('POST /api/admin/import', () => {
     expect(ada?.status).toBe('confirmed');
     expect(ada?.confirmedAt).toBeInstanceOf(Date);
     expect(ada?.source).toBe('import');
-    expect(ada?.attributes).toEqual({ first_name: 'Ada' });
+    // The mapped first_name column lands first-party, not in the attribute map.
+    expect(ada?.firstName).toBe('Ada');
+    expect(ada?.attributes).toEqual({});
 
     const attestation = await (await importAttestationsCollection()).findOne({
       _id: new ObjectId(body.attestationId),

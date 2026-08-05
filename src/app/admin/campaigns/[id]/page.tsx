@@ -10,6 +10,7 @@ import {
 import { listCampaignVersions } from '@/lib/campaigns';
 import { config } from '@/lib/config';
 import { AVAILABLE_MERGE_FIELDS } from '@/lib/merge';
+import { subscriberMergeData } from '@/lib/subscriber-name';
 import { CampaignWorkspace } from '@/components/admin/CampaignWorkspace';
 
 export const dynamic = 'force-dynamic';
@@ -88,17 +89,21 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
         description: field.description,
         system: field.system,
       }))}
-      previewSubscribers={previewSubscribers.map((subscriber) => ({
-        id: subscriber._id.toHexString(),
-        email: subscriber.email,
-        label: `${subscriber.email}${
-          Object.keys(subscriber.attributes ?? {}).length
-            ? ` — ${Object.entries(subscriber.attributes)
-                .map(([key, value]) => `${key}: ${value}`)
-                .join(', ')}`
-            : ' — no attributes'
-        }`,
-      }))}
+      previewSubscribers={previewSubscribers.map((subscriber) => {
+        // Merge data rather than raw attributes, so first-party names show up.
+        const data = subscriberMergeData(subscriber);
+        return {
+          id: subscriber._id.toHexString(),
+          email: subscriber.email,
+          label: `${subscriber.email}${
+            Object.keys(data).length
+              ? ` — ${Object.entries(data)
+                  .map(([key, value]) => `${key}: ${value}`)
+                  .join(', ')}`
+              : ' — no attributes'
+          }`,
+        };
+      })}
       versions={versions.map((version) => ({
         id: version._id.toHexString(),
         createdAt: version.createdAt.toISOString(),
