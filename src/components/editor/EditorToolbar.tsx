@@ -1,6 +1,19 @@
 'use client';
 
 import { useState } from 'react';
+import {
+  Bold,
+  Braces,
+  Heading2,
+  Heading3,
+  Image,
+  Italic,
+  Link,
+  List,
+  ListOrdered,
+  Minus,
+  TextQuote,
+} from 'lucide-react';
 import type { Editor } from '@tiptap/react';
 import { isSafeAbsoluteUrl } from '@/components/editor/extensions';
 
@@ -78,14 +91,14 @@ export function EditorToolbar({ editor, mergeFields, onError }: ToolbarProps) {
         active={editor.isActive('bold')}
         onClick={() => editor.chain().focus().toggleBold().run()}
       >
-        <strong>B</strong>
+        <Bold aria-hidden />
       </Control>
       <Control
         label="Italic"
         active={editor.isActive('italic')}
         onClick={() => editor.chain().focus().toggleItalic().run()}
       >
-        <em>I</em>
+        <Italic aria-hidden />
       </Control>
 
       <span className="sm-toolbar-divider" aria-hidden="true" />
@@ -95,14 +108,14 @@ export function EditorToolbar({ editor, mergeFields, onError }: ToolbarProps) {
         active={editor.isActive('heading', { level: 2 })}
         onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
       >
-        H2
+        <Heading2 aria-hidden />
       </Control>
       <Control
         label="Heading 3"
         active={editor.isActive('heading', { level: 3 })}
         onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
       >
-        H3
+        <Heading3 aria-hidden />
       </Control>
 
       <span className="sm-toolbar-divider" aria-hidden="true" />
@@ -112,21 +125,21 @@ export function EditorToolbar({ editor, mergeFields, onError }: ToolbarProps) {
         active={editor.isActive('bulletList')}
         onClick={() => editor.chain().focus().toggleBulletList().run()}
       >
-        •
+        <List aria-hidden />
       </Control>
       <Control
         label="Numbered list"
         active={editor.isActive('orderedList')}
         onClick={() => editor.chain().focus().toggleOrderedList().run()}
       >
-        1.
+        <ListOrdered aria-hidden />
       </Control>
       <Control
         label="Quote"
         active={editor.isActive('blockquote')}
         onClick={() => editor.chain().focus().toggleBlockquote().run()}
       >
-        &ldquo;
+        <TextQuote aria-hidden />
       </Control>
 
       <span className="sm-toolbar-divider" aria-hidden="true" />
@@ -144,7 +157,7 @@ export function EditorToolbar({ editor, mergeFields, onError }: ToolbarProps) {
           editor.chain().focus().setLink({ href }).run();
         }}
       >
-        Link
+        <Link aria-hidden />
       </Control>
       <Control
         label="Image"
@@ -154,13 +167,13 @@ export function EditorToolbar({ editor, mergeFields, onError }: ToolbarProps) {
           editor.chain().focus().setImage({ src }).run();
         }}
       >
-        Image
+        <Image aria-hidden />
       </Control>
       <Control
         label="Divider"
         onClick={() => editor.chain().focus().setHorizontalRule().run()}
       >
-        &mdash;
+        <Minus aria-hidden />
       </Control>
 
       <span className="sm-toolbar-divider" aria-hidden="true" />
@@ -174,6 +187,7 @@ export function EditorToolbar({ editor, mergeFields, onError }: ToolbarProps) {
           onClick={() => setMergeOpen((open) => !open)}
           className="sm-toolbar-button"
         >
+          <Braces aria-hidden />
           Merge field
         </button>
         {mergeOpen && (

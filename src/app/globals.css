@@ -175,6 +175,10 @@ a:hover {
 button {
   font: inherit;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
   padding: 0.45rem 0.9rem;
   border-radius: var(--radius);
   border: 1px solid var(--line-strong);
@@ -185,6 +189,13 @@ button {
     background-color 0.15s ease,
     color 0.15s ease,
     box-shadow 0.15s ease;
+}
+
+/* Lucide icons inside buttons: sized to the type, never stretching the row. */
+button svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
 }
 
 button:hover:not(:disabled) {
@@ -283,12 +294,21 @@ textarea:focus {
 }
 
 .sm-nav a {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
   padding: 0.42rem 0.6rem;
   border-radius: var(--radius);
   text-decoration: none;
   color: var(--muted);
   transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.sm-nav a svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  stroke-width: 1.75;
 }
 
 .sm-nav a:hover {

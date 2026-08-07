@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Plus } from 'lucide-react';
 
 export function NewCampaignButton({ lists }: { lists: { id: string; name: string }[] }) {
   const router = useRouter();
@@ -44,6 +45,7 @@ export function NewCampaignButton({ lists }: { lists: { id: string; name: string
           }
         }}
       >
+        <Plus aria-hidden />
         New campaign
       </button>
     </div>

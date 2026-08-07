@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Monitor, Moon, Sun } from 'lucide-react';
 
 /**
  * Light / system / dark switcher. The choice is stored in localStorage and
@@ -14,35 +15,9 @@ export type ThemePreference = 'light' | 'system' | 'dark';
 export const THEME_STORAGE_KEY = 'sm-theme';
 
 const OPTIONS: Array<{ value: ThemePreference; label: string; icon: React.ReactNode }> = [
-  {
-    value: 'light',
-    label: 'Light theme',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-        <circle cx="12" cy="12" r="4.5" />
-        <path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8" />
-      </svg>
-    ),
-  },
-  {
-    value: 'system',
-    label: 'Follow system theme',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-        <rect x="3" y="4.5" width="18" height="12.5" rx="2" />
-        <path d="M9 21h6M12 17.5V21" />
-      </svg>
-    ),
-  },
-  {
-    value: 'dark',
-    label: 'Dark theme',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-        <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z" />
-      </svg>
-    ),
-  },
+  { value: 'light', label: 'Light theme', icon: <Sun aria-hidden /> },
+  { value: 'system', label: 'Follow system theme', icon: <Monitor aria-hidden /> },
+  { value: 'dark', label: 'Dark theme', icon: <Moon aria-hidden /> },
 ];
 
 function readStoredPreference(): ThemePreference {
