@@ -1,32 +1,124 @@
 /*
- * A deliberately plain interface. The writing surface is the product (§6);
- * everything else gets out of its way.
+ * A quiet interface with a liquid-glass finish. The writing surface is the
+ * product (§6); surfaces are translucent panes over a soft ambient backdrop,
+ * and one indigo accent carries all interactive state.
+ *
+ * Theming: `:root` holds the light palette. The dark palette applies either
+ * when the OS prefers dark (and no explicit choice overrides it) or when the
+ * theme switcher sets `data-theme="dark"`. `data-theme` is written before
+ * first paint by the inline script in the root layout.
  */
 
 :root {
   color-scheme: light dark;
 
-  --bg: #fbfbfa;
-  --surface: #ffffff;
-  --text: #1c1c1a;
-  --muted: #6b6963;
-  --line: #e4e2dc;
-  --accent: #1a1a17;
+  --radius: 10px;
+  --radius-lg: 16px;
+
+  --bg: #f2f2f6;
+  --surface: rgb(255 255 255 / 62%);
+  --surface-strong: rgb(255 255 255 / 84%);
+  --surface-solid: #ffffff;
+  --field: rgb(255 255 255 / 72%);
+  --text: #1b1b20;
+  --muted: #64646e;
+  --line: rgb(27 27 32 / 10%);
+  --line-strong: rgb(27 27 32 / 16%);
+
+  --accent: #5157d9;
+  --accent-strong: #3f45c6;
+  --accent-text: #4348c6;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgb(81 87 217 / 10%);
+
   --danger: #a3251b;
   --ok: #1f6b3a;
-  --radius: 8px;
+
+  --glow-1: rgb(88 96 224 / 14%);
+  --glow-2: rgb(52 168 180 / 11%);
+  --glow-3: rgb(88 96 224 / 8%);
+
+  --shadow: 0 1px 2px rgb(18 20 45 / 4%), 0 8px 24px rgb(18 20 45 / 6%);
+  --shadow-pop: 0 2px 6px rgb(18 20 45 / 8%), 0 16px 48px rgb(18 20 45 / 16%);
+  --blur: saturate(160%) blur(14px);
 }
 
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+/* The dark palette, applied two ways (see file header). Keep both selector
+   blocks in sync — CSS offers no way to alias a variable set. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #17171a;
-    --surface: #1e1e21;
-    --text: #ececea;
-    --muted: #8d8b85;
-    --line: #313135;
-    --accent: #ececea;
+  :root:not([data-theme='light']) {
+    --bg: #101014;
+    --surface: rgb(30 30 39 / 62%);
+    --surface-strong: rgb(32 32 41 / 88%);
+    --surface-solid: #1e1e26;
+    --field: rgb(16 16 22 / 55%);
+    --text: #ececf1;
+    --muted: #9c9ca8;
+    --line: rgb(235 235 245 / 10%);
+    --line-strong: rgb(235 235 245 / 18%);
+
+    --accent: #666de0;
+    --accent-strong: #7d84ef;
+    --accent-text: #a6abfa;
+    --accent-contrast: #ffffff;
+    --accent-soft: rgb(125 132 239 / 14%);
+
     --danger: #ef7b70;
     --ok: #6cc08b;
+
+    --glow-1: rgb(102 110 235 / 17%);
+    --glow-2: rgb(52 168 180 / 10%);
+    --glow-3: rgb(102 110 235 / 9%);
+
+    --shadow: 0 1px 2px rgb(0 0 0 / 20%), 0 8px 24px rgb(0 0 0 / 26%);
+    --shadow-pop: 0 2px 6px rgb(0 0 0 / 30%), 0 16px 48px rgb(0 0 0 / 45%);
+  }
+}
+
+:root[data-theme='dark'] {
+  --bg: #101014;
+  --surface: rgb(30 30 39 / 62%);
+  --surface-strong: rgb(32 32 41 / 88%);
+  --surface-solid: #1e1e26;
+  --field: rgb(16 16 22 / 55%);
+  --text: #ececf1;
+  --muted: #9c9ca8;
+  --line: rgb(235 235 245 / 10%);
+  --line-strong: rgb(235 235 245 / 18%);
+
+  --accent: #666de0;
+  --accent-strong: #7d84ef;
+  --accent-text: #a6abfa;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgb(125 132 239 / 14%);
+
+  --danger: #ef7b70;
+  --ok: #6cc08b;
+
+  --glow-1: rgb(102 110 235 / 17%);
+  --glow-2: rgb(52 168 180 / 10%);
+  --glow-3: rgb(102 110 235 / 9%);
+
+  --shadow: 0 1px 2px rgb(0 0 0 / 20%), 0 8px 24px rgb(0 0 0 / 26%);
+  --shadow-pop: 0 2px 6px rgb(0 0 0 / 30%), 0 16px 48px rgb(0 0 0 / 45%);
+}
+
+/* Glass depends on translucency; honour users who ask for less of it. */
+@media (prefers-reduced-transparency: reduce) {
+  :root,
+  :root[data-theme='dark'] {
+    --surface: var(--surface-solid);
+    --surface-strong: var(--surface-solid);
+    --field: var(--surface-solid);
+    --blur: none;
   }
 }
 
@@ -38,14 +130,36 @@ html,
 body {
   margin: 0;
   padding: 0;
-  background: var(--bg);
   color: var(--text);
   font: 16px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
     sans-serif;
 }
 
+/* The ambient backdrop the glass panes sample from: two cool glows and a
+   faint counter-glow, fixed so panes slide over it while scrolling. */
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(60rem 40rem at 8% -10%, var(--glow-1), transparent 60%),
+    radial-gradient(50rem 36rem at 100% 0%, var(--glow-2), transparent 55%),
+    radial-gradient(44rem 44rem at 50% 120%, var(--glow-3), transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+h1 {
+  font-size: 1.4rem;
+  letter-spacing: -0.015em;
+}
+
 a {
-  color: inherit;
+  color: var(--accent-text);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+a:hover {
+  color: var(--accent-strong);
 }
 
 .muted {
@@ -53,18 +167,28 @@ a {
   font-size: 0.875rem;
 }
 
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 button {
   font: inherit;
   cursor: pointer;
-  padding: 0.45rem 0.85rem;
+  padding: 0.45rem 0.9rem;
   border-radius: var(--radius);
-  border: 1px solid var(--line);
-  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  background: var(--surface-strong);
   color: var(--text);
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 button:hover:not(:disabled) {
-  border-color: var(--muted);
+  border-color: var(--accent);
 }
 
 button:disabled {
@@ -73,10 +197,24 @@ button:disabled {
 }
 
 button.sm-primary {
-  background: var(--accent);
-  color: var(--bg);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 88%, white),
+    var(--accent)
+  );
+  color: var(--accent-contrast);
   border-color: var(--accent);
   font-weight: 500;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+button.sm-primary:hover:not(:disabled) {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent-strong) 88%, white),
+    var(--accent-strong)
+  );
+  border-color: var(--accent-strong);
 }
 
 input,
@@ -85,9 +223,20 @@ textarea {
   font: inherit;
   padding: 0.45rem 0.6rem;
   border-radius: var(--radius);
-  border: 1px solid var(--line);
-  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  background: var(--field);
   color: var(--text);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 /* ----------------------------------------------------------------- shell */
@@ -99,34 +248,147 @@ textarea {
 }
 
 .sm-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
   border-right: 1px solid var(--line);
   padding: 1.25rem 1rem;
   background: var(--surface);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
 }
 
 .sm-nav h1 {
-  font-size: 0.95rem;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--muted);
-  margin: 0 0 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.92rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: var(--text);
+  margin: 0 0 1.25rem;
+}
+
+.sm-brand-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), #38a8b4);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 55%, transparent);
+  flex: none;
 }
 
 .sm-nav a {
   display: block;
-  padding: 0.4rem 0.5rem;
+  padding: 0.42rem 0.6rem;
   border-radius: var(--radius);
   text-decoration: none;
+  color: var(--muted);
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-.sm-nav a:hover,
+.sm-nav a:hover {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  color: var(--text);
+}
+
 .sm-nav a[aria-current='page'] {
-  background: var(--bg);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: 550;
+}
+
+.sm-nav-foot {
+  margin-top: auto;
+  padding-top: 1rem;
 }
 
 .sm-main {
   padding: 1.5rem 2rem 4rem;
   min-width: 0;
+}
+
+/* ---------------------------------------------------------- theme toggle */
+
+.sm-theme-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-strong);
+}
+
+.sm-theme-toggle button {
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  padding: 0.32rem 0.5rem;
+  line-height: 0;
+  color: var(--muted);
+  box-shadow: none;
+}
+
+.sm-theme-toggle button:hover:not(:disabled) {
+  color: var(--text);
+  border-color: transparent;
+}
+
+.sm-theme-toggle button[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.sm-theme-toggle svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* ----------------------------------------------------------------- login */
+
+.sm-login {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.sm-login-card {
+  width: 100%;
+  max-width: 24rem;
+  background: var(--surface);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  padding: 2rem;
+}
+
+.sm-login-card h1 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.2rem;
+  margin: 0 0 0.35rem;
+}
+
+.sm-login-card .muted {
+  margin: 0 0 1.25rem;
+}
+
+.sm-login-card button[type='submit'] {
+  width: 100%;
+}
+
+.sm-login-theme {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
 }
 
 /* ----------------------------------------------------------------- tables */
@@ -153,6 +415,10 @@ textarea {
   letter-spacing: 0.03em;
 }
 
+.sm-table tbody tr:hover td {
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+}
+
 .sm-scroll {
   overflow-x: auto;
 }
@@ -168,8 +434,11 @@ textarea {
 
 .sm-card {
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   background: var(--surface);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--shadow);
   padding: 0.9rem 1rem;
 }
 
@@ -184,12 +453,15 @@ textarea {
 .sm-card dd {
   margin: 0;
   font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
 }
 
 /* Reputation is surfaced prominently, never buried in a metrics tab (§8.3). */
 .sm-card.is-warning {
   border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 5%, var(--surface));
 }
 
 .sm-card.is-warning dd {
@@ -204,6 +476,8 @@ textarea {
   word-break: break-word;
   font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
   background: var(--surface);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 0.75rem 0.9rem;
@@ -228,7 +502,7 @@ textarea {
   font-size: 1.35rem;
   font-weight: 600;
   border: none;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-strong);
   border-radius: 0;
   padding-left: 0;
   background: transparent;
@@ -236,11 +510,17 @@ textarea {
 
 .sm-preheader {
   border: none;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-strong);
   border-radius: 0;
   padding-left: 0;
   background: transparent;
   color: var(--muted);
+}
+
+.sm-subject:focus,
+.sm-preheader:focus {
+  border-color: var(--accent);
+  box-shadow: none;
 }
 
 .sm-screen-status {
@@ -269,14 +549,25 @@ textarea {
   .sm-shell {
     grid-template-columns: 1fr;
   }
+  .sm-nav {
+    position: static;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
 }
 
 .sm-editor {
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   background: var(--surface);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--shadow);
 }
 
+/* No overflow clipping on .sm-editor — it would defeat the sticky toolbar —
+   so the toolbar rounds its own top corners to match the editor frame. */
 .sm-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -284,9 +575,12 @@ textarea {
   gap: 0.25rem;
   padding: 0.4rem;
   border-bottom: 1px solid var(--line);
+  border-radius: calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px) 0 0;
   position: sticky;
   top: 0;
-  background: var(--surface);
+  background: var(--surface-strong);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
   z-index: 2;
 }
 
@@ -297,15 +591,21 @@ textarea {
   background: transparent;
 }
 
+.sm-toolbar-button:hover:not(:disabled) {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+
 .sm-toolbar-button.is-active {
-  background: var(--bg);
-  border-color: var(--line);
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent-text);
 }
 
 .sm-toolbar-divider {
   width: 1px;
   height: 1.2rem;
-  background: var(--line);
+  background: var(--line-strong);
   margin: 0 0.25rem;
 }
 
@@ -319,10 +619,12 @@ textarea {
   top: calc(100% + 0.25rem);
   left: 0;
   min-width: 15rem;
-  background: var(--surface);
+  background: var(--surface-strong);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+  box-shadow: var(--shadow-pop);
   padding: 0.25rem;
 }
 
@@ -332,10 +634,11 @@ textarea {
   text-align: left;
   border: none;
   background: transparent;
+  box-shadow: none;
 }
 
 .sm-merge-menu button:hover {
-  background: var(--bg);
+  background: var(--accent-soft);
 }
 
 .sm-merge-menu small {
@@ -368,7 +671,7 @@ textarea {
 .sm-editor-surface blockquote {
   margin: 0 0 1rem;
   padding-left: 1rem;
-  border-left: 3px solid var(--line);
+  border-left: 3px solid var(--accent);
   color: var(--muted);
 }
 
@@ -431,8 +734,12 @@ textarea {
 
 .sm-preview {
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   background: var(--surface);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--shadow);
+  overflow: hidden;
   position: sticky;
   top: 1rem;
 }
@@ -454,8 +761,9 @@ textarea {
 
 .sm-preview-bar [aria-selected='true'],
 .sm-preview-bar [aria-checked='true'] {
-  background: var(--bg);
-  border-color: var(--muted);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-text);
 }
 
 .sm-preview-as {
@@ -470,13 +778,14 @@ textarea {
   display: flex;
   justify-content: center;
   padding: 0.75rem;
-  background: var(--bg);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
   min-height: 28rem;
 }
 
+/* Recipients read email on white; the preview does not follow the theme. */
 .sm-preview-frame {
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 6px;
   background: #fff;
   min-height: 28rem;
   width: 100%;
@@ -486,9 +795,9 @@ textarea {
   white-space: pre-wrap;
   word-break: break-word;
   font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
-  background: var(--surface);
+  background: var(--surface-solid);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 1rem;
   margin: 0;
   overflow-x: auto;
@@ -509,8 +818,9 @@ textarea {
 }
 
 .sm-body-mode [aria-selected='true'] {
-  background: var(--bg);
-  border-color: var(--muted);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-text);
   font-weight: 500;
 }
 
@@ -559,8 +869,9 @@ textarea {
 }
 
 .sm-template-kinds [aria-selected='true'] {
-  background: var(--bg);
-  border-color: var(--muted);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-text);
   font-weight: 500;
 }
 
@@ -599,6 +910,7 @@ textarea {
   padding: 0.6rem 0.6rem 0.6rem 1.6rem;
   border: 1px solid var(--danger);
   border-radius: var(--radius);
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
   color: var(--danger);
   font-size: 0.875rem;
 }
@@ -639,7 +951,9 @@ textarea {
 .sm-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgb(0 0 0 / 45%);
+  background: rgb(10 11 26 / 40%);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
   display: grid;
   place-items: center;
   padding: 1.5rem;
@@ -647,9 +961,12 @@ textarea {
 }
 
 .sm-modal {
-  background: var(--surface);
-  border-radius: 12px;
+  background: var(--surface-strong);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  border-radius: var(--radius-lg);
   border: 1px solid var(--line);
+  box-shadow: var(--shadow-pop);
   padding: 1.5rem;
   max-width: 34rem;
   width: 100%;
@@ -687,6 +1004,7 @@ textarea {
 .sm-modal-blockers {
   border: 1px solid var(--danger);
   border-radius: var(--radius);
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
   padding: 0.75rem 1rem;
   color: var(--danger);
   margin: 0 0 1.25rem;
@@ -713,32 +1031,43 @@ textarea {
 
 .sm-badge {
   display: inline-block;
-  padding: 0.1rem 0.5rem;
+  padding: 0.1rem 0.55rem;
   border-radius: 999px;
   font-size: 0.75rem;
-  border: 1px solid var(--line);
+  font-weight: 500;
+  border: 1px solid var(--line-strong);
   color: var(--muted);
+  background: color-mix(in srgb, currentcolor 7%, transparent);
 }
 
 .sm-badge.is-confirmed,
 .sm-badge.is-sent {
   color: var(--ok);
-  border-color: currentcolor;
+  border-color: color-mix(in srgb, currentcolor 55%, transparent);
+}
+
+.sm-badge.is-sending,
+.sm-badge.is-scheduled {
+  color: var(--accent-text);
+  border-color: color-mix(in srgb, currentcolor 55%, transparent);
 }
 
 .sm-badge.is-bounced,
 .sm-badge.is-complained,
 .sm-badge.is-failed {
   color: var(--danger);
-  border-color: currentcolor;
+  border-color: color-mix(in srgb, currentcolor 55%, transparent);
 }
 
 /* --------------------------------------------------------------- segment */
 
 .sm-segment {
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   background: var(--surface);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--shadow);
   padding: 0.75rem 1rem;
 }
 

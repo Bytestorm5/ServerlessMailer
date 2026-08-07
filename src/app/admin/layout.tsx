@@ -1,5 +1,6 @@
-import Link from 'next/link';
 import { requireAdminPage } from '@/lib/auth-server';
+import { NavLink } from '@/components/admin/NavLink';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   await requireAdminPage();
@@ -7,14 +8,22 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   return (
     <div className="sm-shell">
       <nav className="sm-nav">
-        <h1>ServerlessMailer</h1>
-        <Link href="/admin">Dashboard</Link>
-        <Link href="/admin/lists">Lists</Link>
-        <Link href="/admin/campaigns">Campaigns</Link>
-        <Link href="/admin/templates">Templates</Link>
-        <Link href="/admin/subscribers">Subscribers</Link>
-        <Link href="/admin/suppressions">Suppressions</Link>
-        <Link href="/admin/import">Import &amp; export</Link>
+        <h1>
+          <span className="sm-brand-dot" aria-hidden />
+          ServerlessMailer
+        </h1>
+        <NavLink href="/admin" exact>
+          Dashboard
+        </NavLink>
+        <NavLink href="/admin/lists">Lists</NavLink>
+        <NavLink href="/admin/campaigns">Campaigns</NavLink>
+        <NavLink href="/admin/templates">Templates</NavLink>
+        <NavLink href="/admin/subscribers">Subscribers</NavLink>
+        <NavLink href="/admin/suppressions">Suppressions</NavLink>
+        <NavLink href="/admin/import">Import &amp; export</NavLink>
+        <div className="sm-nav-foot">
+          <ThemeToggle />
+        </div>
       </nav>
       <main className="sm-main">{children}</main>
     </div>

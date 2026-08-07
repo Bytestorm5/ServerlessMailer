@@ -1,12 +1,22 @@
 import { LoginForm } from '@/components/admin/LoginForm';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 export const metadata = { title: 'Sign in — ServerlessMailer' };
 
 export default function LoginPage() {
   return (
-    <main style={{ maxWidth: '22rem', margin: '18vh auto', padding: '0 1.25rem' }}>
-      <h1 style={{ fontSize: '1.25rem', marginBottom: '1rem' }}>ServerlessMailer</h1>
-      <LoginForm />
+    <main className="sm-login">
+      <div className="sm-login-card">
+        <h1>
+          <span className="sm-brand-dot" aria-hidden />
+          ServerlessMailer
+        </h1>
+        <p className="muted">Sign in to manage lists, campaigns, and sending.</p>
+        <LoginForm />
+      </div>
+      <div className="sm-login-theme">
+        <ThemeToggle />
+      </div>
     </main>
   );
 }
