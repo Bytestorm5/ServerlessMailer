@@ -1,4 +1,4 @@
-import { ObjectId } from 'mongodb';
+import { MongoBulkWriteError, ObjectId, type AnyBulkWriteOperation, type WriteError } from 'mongodb';
 import { importAttestationsCollection, subscribersCollection } from '@/lib/db/collections';
 import { parseCsv } from '@/lib/csv/parse';
 import { normalizeAndValidate } from '@/lib/email/normalize';
@@ -48,6 +48,9 @@ export interface ImportMapping {
 }
 
 const SAFE_ATTRIBUTE_KEY = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Rows per lookup + bulk write; keeps each `$in` query well under 16MB. */
+const WRITE_CHUNK = 1000;
 
 export async function importSubscribers(input: {
   listId: ObjectId;
@@ -177,101 +180,135 @@ export async function importSubscribers(input: {
     result.attestationId = attestationId;
   }
 
+  const historyReason = attestationId
+    ? `import:attestation:${attestationId.toHexString()}`
+    : 'import';
+
+  const eligible: Candidate[] = [];
   for (const candidate of candidates) {
-    if (suppressed.has(candidate.email)) {
-      result.skippedSuppressed += 1;
-      continue;
-    }
+    if (suppressed.has(candidate.email)) result.skippedSuppressed += 1;
+    else eligible.push(candidate);
+  }
 
-    const existing = await collection.findOne({
-      listId: input.listId,
-      email: candidate.email,
-    });
+  // Batched: one lookup and one bulk write per chunk. Doing a findOne plus an
+  // insert or update per row costs two round trips each, which on a
+  // 33,000-row file blows well past the request's time budget.
+  for (let i = 0; i < eligible.length; i += WRITE_CHUNK) {
+    const chunk = eligible.slice(i, i + WRITE_CHUNK);
 
-    const attributeUpdates: Record<string, string> = {};
-    for (const [key, value] of Object.entries(candidate.attributes)) {
-      attributeUpdates[`attributes.${key}`] = value;
-    }
-    if (candidate.firstName !== undefined) attributeUpdates.firstName = candidate.firstName;
-    if (candidate.lastName !== undefined) attributeUpdates.lastName = candidate.lastName;
-
-    if (!existing) {
-      const doc: SubscriberDoc = {
-        _id: new ObjectId(),
-        listId: input.listId,
-        email: candidate.email,
-        emailDomain: candidate.domain,
-        status: asConfirmed ? 'confirmed' : 'pending',
-        ...(candidate.firstName !== undefined ? { firstName: candidate.firstName } : {}),
-        ...(candidate.lastName !== undefined ? { lastName: candidate.lastName } : {}),
-        attributes: candidate.attributes,
-        source: 'import',
-        createdAt: now,
-        ...(asConfirmed ? { confirmedAt: now } : {}),
-        history: [
-          {
-            at: now,
-            from: null,
-            to: asConfirmed ? 'confirmed' : 'pending',
-            reason: attestationId
-              ? `import:attestation:${attestationId.toHexString()}`
-              : 'import',
-          },
-        ],
-      };
-      try {
-        await collection.insertOne(doc);
-        result.imported += 1;
-      } catch (err) {
-        if ((err as { code?: number }).code === 11000) {
-          // Raced with a concurrent import of the same file.
-          result.updated += 1;
-        } else {
-          throw err;
-        }
-      }
-      continue;
-    }
-
-    // Already known. Update attributes and never touch consent state — a
-    // re-import must not resurrect an unsubscribe or a bounce.
-    if (
-      existing.status === 'unsubscribed' ||
-      existing.status === 'bounced' ||
-      existing.status === 'complained'
-    ) {
-      if (Object.keys(attributeUpdates).length > 0) {
-        await collection.updateOne({ _id: existing._id }, { $set: attributeUpdates });
-      }
-      result.skippedTombstoned += 1;
-      continue;
-    }
-
-    const promote = asConfirmed && existing.status === 'pending';
-    await collection.updateOne(
-      { _id: existing._id },
-      {
-        $set: {
-          ...attributeUpdates,
-          ...(promote ? { status: 'confirmed', confirmedAt: existing.confirmedAt ?? now } : {}),
-        },
-        ...(promote
-          ? {
-              $push: {
-                history: {
-                  at: now,
-                  from: existing.status,
-                  to: 'confirmed' as const,
-                  reason: attestationId
-                    ? `import:attestation:${attestationId.toHexString()}`
-                    : 'import',
-                },
-              },
-            }
-          : {}),
-      },
+    const existingByEmail = new Map<
+      string,
+      Pick<SubscriberDoc, '_id' | 'email' | 'status' | 'confirmedAt'>
+    >();
+    const cursor = collection.find(
+      { listId: input.listId, email: { $in: chunk.map((c) => c.email) } },
+      { projection: { _id: 1, email: 1, status: 1, confirmedAt: 1 } },
     );
-    result.updated += 1;
+    for await (const doc of cursor) existingByEmail.set(doc.email, doc);
+
+    const operations: AnyBulkWriteOperation<SubscriberDoc>[] = [];
+    let inserts = 0;
+
+    for (const candidate of chunk) {
+      const existing = existingByEmail.get(candidate.email);
+
+      const attributeUpdates: Record<string, string> = {};
+      for (const [key, value] of Object.entries(candidate.attributes)) {
+        attributeUpdates[`attributes.${key}`] = value;
+      }
+      if (candidate.firstName !== undefined) attributeUpdates.firstName = candidate.firstName;
+      if (candidate.lastName !== undefined) attributeUpdates.lastName = candidate.lastName;
+
+      if (!existing) {
+        const doc: SubscriberDoc = {
+          _id: new ObjectId(),
+          listId: input.listId,
+          email: candidate.email,
+          emailDomain: candidate.domain,
+          status: asConfirmed ? 'confirmed' : 'pending',
+          ...(candidate.firstName !== undefined ? { firstName: candidate.firstName } : {}),
+          ...(candidate.lastName !== undefined ? { lastName: candidate.lastName } : {}),
+          attributes: candidate.attributes,
+          source: 'import',
+          createdAt: now,
+          ...(asConfirmed ? { confirmedAt: now } : {}),
+          history: [
+            {
+              at: now,
+              from: null,
+              to: asConfirmed ? 'confirmed' : 'pending',
+              reason: historyReason,
+            },
+          ],
+        };
+        operations.push({ insertOne: { document: doc } });
+        inserts += 1;
+        continue;
+      }
+
+      // Already known. Update attributes and never touch consent state — a
+      // re-import must not resurrect an unsubscribe or a bounce.
+      if (
+        existing.status === 'unsubscribed' ||
+        existing.status === 'bounced' ||
+        existing.status === 'complained'
+      ) {
+        if (Object.keys(attributeUpdates).length > 0) {
+          operations.push({
+            updateOne: { filter: { _id: existing._id }, update: { $set: attributeUpdates } },
+          });
+        }
+        result.skippedTombstoned += 1;
+        continue;
+      }
+
+      const promote = asConfirmed && existing.status === 'pending';
+      if (promote || Object.keys(attributeUpdates).length > 0) {
+        operations.push({
+          updateOne: {
+            // The status guard keeps a promotion from overwriting a concurrent
+            // unsubscribe that landed between the lookup and this write.
+            filter: promote ? { _id: existing._id, status: 'pending' } : { _id: existing._id },
+            update: {
+              $set: {
+                ...attributeUpdates,
+                ...(promote
+                  ? { status: 'confirmed', confirmedAt: existing.confirmedAt ?? now }
+                  : {}),
+              },
+              ...(promote
+                ? {
+                    $push: {
+                      history: {
+                        at: now,
+                        from: existing.status,
+                        to: 'confirmed' as const,
+                        reason: historyReason,
+                      },
+                    },
+                  }
+                : {}),
+            },
+          },
+        });
+      }
+      result.updated += 1;
+    }
+
+    if (operations.length === 0) continue;
+
+    try {
+      await collection.bulkWrite(operations, { ordered: false });
+      result.imported += inserts;
+    } catch (err) {
+      if (!(err instanceof MongoBulkWriteError)) throw err;
+      const writeErrors = ([] as WriteError[]).concat(err.writeErrors);
+      if (writeErrors.some((writeError) => writeError.code !== 11000)) throw err;
+      // Raced with a concurrent import of the same file: those rows already
+      // exist, and every other write in the unordered batch still went through.
+      result.imported += inserts - writeErrors.length;
+      result.updated += writeErrors.length;
+    }
   }
 
   logger.info('subscriber import complete', {

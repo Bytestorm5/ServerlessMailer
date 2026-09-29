@@ -314,3 +314,41 @@ describe('importSubscribers — attribute mapping', () => {
     expect(doc?.source).toBe('import');
   });
 });
+
+describe('importSubscribers — large files', () => {
+  it('imports a 33,000-row migration in batches, mixing new, known and suppressed rows', async () => {
+    // Regression: a findOne plus a write per row timed the request out on the
+    // real migration file. Writes are now batched per chunk.
+    const rows = Array.from({ length: 33_000 }, (_, i) => `user${i}@example.com,Name${i}`);
+    await createSubscriber(list._id, { email: 'user5@example.com', status: 'pending' });
+    await createSubscriber(list._id, { email: 'user1500@example.com', status: 'unsubscribed' });
+    await addSuppression({ email: 'user2500@example.com', reason: 'hard_bounce' });
+
+    const result = await run(`email,first\n${rows.join('\n')}\n`, {
+      mapping: { email: 'email', attributes: { first: 'first_name' } },
+      markConfirmed: true,
+      attestation: ATTESTATION,
+    });
+
+    expect(result.total).toBe(33_000);
+    expect(result.imported).toBe(32_997);
+    expect(result.updated).toBe(1);
+    expect(result.skippedTombstoned).toBe(1);
+    expect(result.skippedSuppressed).toBe(1);
+    expect(await (await subscribersCollection()).countDocuments({ listId: list._id })).toBe(32_999);
+    expect(await statusOf('user5@example.com')).toBe('confirmed');
+    expect(await statusOf('user1500@example.com')).toBe('unsubscribed');
+    expect(await statusOf('user2500@example.com')).toBeUndefined();
+    const doc = await (await subscribersCollection()).findOne({ email: 'user32999@example.com' });
+    expect(doc?.firstName).toBe('Name32999');
+  }, 60_000);
+
+  it('counts rows a concurrent import already inserted as updated, and keeps going', async () => {
+    const csv = 'email\n' + Array.from({ length: 50 }, (_, i) => `r${i}@example.com`).join('\n');
+    const [first, second] = await Promise.all([run(csv), run(csv)]);
+    expect(first.imported + second.imported).toBe(50);
+    expect(first.imported + first.updated).toBe(50);
+    expect(second.imported + second.updated).toBe(50);
+    expect(await (await subscribersCollection()).countDocuments({ listId: list._id })).toBe(50);
+  });
+});
